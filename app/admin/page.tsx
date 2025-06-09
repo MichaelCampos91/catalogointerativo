@@ -64,7 +64,7 @@ export default function AdminPage() {
       setError(null)
       console.log("Carregando pedidos...")
 
-      const response = await fetch("/api/orders")
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH || '/catalogointerativo'}/api/orders`)
 
       if (!response.ok) {
         const errorData = await response.json()
@@ -91,7 +91,7 @@ export default function AdminPage() {
 
     try {
       console.log(`Filtrando pedidos por data: ${dateFilter}`)
-      const response = await fetch(`/api/orders?date=${dateFilter}`)
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH || '/catalogointerativo'}/api/orders?date=${dateFilter}`)
 
       if (!response.ok) {
         const errorData = await response.json()
@@ -113,7 +113,7 @@ export default function AdminPage() {
       setLoading(true)
 
       console.log("Inicializando banco de dados...")
-      const response = await fetch("/api/init-db", {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH || '/catalogointerativo'}/api/init-db`, {
         method: "POST",
       })
 
