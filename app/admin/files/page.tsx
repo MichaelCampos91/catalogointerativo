@@ -62,7 +62,7 @@ export default function FilesPage() {
 
       // Remover "files" do início do caminho se existir
       const cleanDir = currentDir.startsWith("files/") ? currentDir.slice(6) : currentDir
-      const response = await fetch("/api/files?dir=${encodeURIComponent(cleanDir)}`)
+      const response = await fetch(`/api/files?dir=${encodeURIComponent(cleanDir)}`)
 
       if (!response.ok) {
         const errorData = await response.json()
