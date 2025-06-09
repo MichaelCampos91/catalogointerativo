@@ -21,7 +21,7 @@ export default function HomePage() {
   const router = useRouter()
 
   const handleStart = () => {
-    if (customerName && orderNumber && quantity) {
+    if (customerName && orderNumber && quantity && !isLocked) {
       localStorage.setItem(
         "customerData",
         JSON.stringify({
