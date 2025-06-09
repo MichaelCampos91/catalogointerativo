@@ -12,6 +12,7 @@ import { Suspense } from "react"
 import { CustomerInitializer } from "@/components/CustomerInitializer"
 
 export default function HomePage() {
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '/catalogointerativo'
   const [customerName, setCustomerName] = useState("")
   const [orderNumber, setOrderNumber] = useState("")
   const [quantity, setQuantity] = useState("")
@@ -30,7 +31,7 @@ export default function HomePage() {
         }),
       )
       localStorage.setItem("sessionLocked", "true")
-      router.push(`/catalog`)
+      router.push(`${basePath}/catalog`)
     }
   }
 
@@ -127,7 +128,7 @@ export default function HomePage() {
           </Card>
 
           <div className="mt-8 text-center space-y-2">
-            <Button variant="link" onClick={() => router.push(`/admin`)}>
+            <Button variant="link" onClick={() => router.push(`${basePath}/admin`)}>
               Área Administrativa
             </Button>
           </div>
