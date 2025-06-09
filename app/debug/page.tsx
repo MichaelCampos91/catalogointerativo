@@ -26,13 +26,14 @@ export default function DebugPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/catalogointerativo"
 
   const loadDebugInfo = async () => {
     try {
       setLoading(true)
       setError(null)
 
-      const response = await fetch("/api/debug")
+      const response = await fetch(`${basePath}/api/debug`)
 
       if (!response.ok) {
         const errorData = await response.json()
@@ -54,7 +55,7 @@ export default function DebugPage() {
       setLoading(true)
       setError(null)
 
-      const response = await fetch("/api/init-db", {
+      const response = await fetch(`${basePath}/api/init-db`, {
         method: "POST",
       })
 
@@ -101,7 +102,7 @@ export default function DebugPage() {
             <h1 className="text-2xl font-bold text-gray-900">Debug do Sistema</h1>
             <p className="text-gray-600">Diagnóstico completo da aplicação</p>
           </div>
-          <Button variant="outline" onClick={() => router.push("/")}>
+          <Button variant="outline" onClick={() => router.push(`${basePath}/`)}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             Voltar ao Início
           </Button>

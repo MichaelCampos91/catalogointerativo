@@ -33,6 +33,7 @@ export default function FilesPage() {
   const [password, setPassword] = useState("")
   const router = useRouter()
   const searchParams = useSearchParams()
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/catalogointerativo"
 
   // Senha simples para demo (em produção, use autenticação adequada)
   const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "admin123"
@@ -61,7 +62,7 @@ export default function FilesPage() {
 
       // Remover "files" do início do caminho se existir
       const cleanDir = currentDir.startsWith("files/") ? currentDir.slice(6) : currentDir
-      const response = await fetch(`/api/files?dir=${encodeURIComponent(cleanDir)}`)
+      const response = await fetch(`${basePath}/api/files?dir=${encodeURIComponent(cleanDir)}`)
 
       if (!response.ok) {
         const errorData = await response.json()
@@ -134,7 +135,7 @@ export default function FilesPage() {
             <Button onClick={handleLogin} className="w-full">
               Entrar
             </Button>
-            <Button variant="outline" onClick={() => router.push("/admin")} className="w-full">
+            <Button variant="outline" onClick={() => router.push(`${basePath}/admin`)} className="w-full">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Voltar ao Painel
             </Button>
@@ -157,7 +158,7 @@ export default function FilesPage() {
               <RefreshCw className="w-4 h-4 mr-2" />
               Atualizar
             </Button>
-            <Button variant="outline" onClick={() => router.push("/admin")}>
+            <Button variant="outline" onClick={() => router.push(`${basePath}/admin`)}>
               <ArrowLeft className="w-4 h-4 mr-2" />
               Voltar ao Painel
             </Button>
