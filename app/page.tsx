@@ -18,6 +18,7 @@ export default function HomePage() {
   const [isLocked, setIsLocked] = useState(false)
   const [isFromUrl, setIsFromUrl] = useState(false)
   const router = useRouter()
+  const basePath = '/catalogointerativo'
 
   const handleStart = () => {
     if (customerName && orderNumber && quantity) {
@@ -30,7 +31,7 @@ export default function HomePage() {
         }),
       )
       localStorage.setItem("sessionLocked", "true")
-      router.push("/catalog")
+      router.push(`${basePath}/catalog`)
     }
   }
 
@@ -127,7 +128,7 @@ export default function HomePage() {
           </Card>
 
           <div className="mt-8 text-center space-y-2">
-            <Button variant="link" onClick={() => router.push("/admin")}>
+            <Button variant="link" onClick={() => router.push(`${basePath}/admin`)}>
               Área Administrativa
             </Button>
           </div>
