@@ -93,7 +93,7 @@ export default function CatalogPage() {
     }
   }
 
-  const handleFinishSelection = async () => {
+  const handleConfirmOrder = async () => {
     if (!customerData || !isAware) return
 
     const message = `Olá! Meu nome é *${customerData.name}* e esses são os temas que escolhi do catálogo:\n\n${selectedImages.map((code) => `*${code}*`).join("\n")} \n Nº do pedido: *${customerData.orderNumber}*`
@@ -138,6 +138,10 @@ export default function CatalogPage() {
       console.error("Erro ao salvar pedido:", error)
       setError(error instanceof Error ? error.message : "Erro ao salvar pedido")
     }
+  }
+
+  const getImagesByCategory = (categoryId: string) => {
+    return images.filter((img) => img.category_id === categoryId)
   }
 
   // Função para filtrar categorias baseado na busca
@@ -235,68 +239,70 @@ export default function CatalogPage() {
           </div>
         ) : (
           filteredCategories.map((category) => {
-            const categoryImages = images.filter(img => img.category_id === category.id)
+            const categoryImages = getImagesByCategory(category.id)
             if (categoryImages.length === 0) return null
 
             return (
               <div key={category.id} className="mb-8">
                 <h2 className="text-xl font-bold mb-4 text-gray-900">{category.name}</h2>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                  {categoryImages.map((image) => (
-                    <div
-                      key={image.id}
-                      className={`relative aspect-square rounded-lg overflow-hidden border-2 cursor-pointer transition-all ${
-                        selectedImages.includes(image.code)
-                          ? "border-indigo-600 ring-2 ring-indigo-600"
-                          : "border-gray-200 hover:border-indigo-400"
-                      }`}
-                      onClick={() => handleImageSelect(image.code)}
-                    >
-                      <Image
-                        src={image.image_url}
-                        alt={image.code}
-                        fill
-                        className="object-cover"
-                        sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 25vw"
-                      />
-                      <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white p-2 text-sm">
-                        {image.code}
-                      </div>
+
+                <div className="relative">
+                  <div className="overflow-x-auto pb-4">
+                    <div className="inline-flex gap-3 min-w-full">
+                      {categoryImages.map((image) => {
+                        const isSelected = selectedImages.includes(image.code)
+                        const isDisabled = !isSelected && selectedImages.length >= customerData.quantity
+
+                        return (
+                          <Card
+                            key={image.id}
+                            className={`relative cursor-pointer transition-all flex-shrink-0 w-[200px] ${
+                              isSelected ? "ring-2 ring-indigo-500" : ""
+                            } ${isDisabled ? "opacity-50" : "hover:shadow-md"}`}
+                            onClick={() => !isDisabled && handleImageSelect(image.code)}
+                          >
+                            <CardContent className="p-0">
+                              <div className="relative aspect-square">
+                                <img
+                                  src={image.image_url}
+                                  alt={image.code}
+                                  className="object-cover w-full h-full"
+                                />
+                                {isSelected && (
+                                  <div className="absolute inset-0 bg-indigo-500 bg-opacity-20 flex items-center justify-center">
+                                    <Check className="w-8 h-8 text-indigo-500" />
+                                  </div>
+                                )}
+                              </div>
+                              <div className="p-2 text-center">
+                                <p className="text-sm font-medium">{image.code}</p>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        )
+                      })}
                     </div>
-                  ))}
+                  </div>
                 </div>
               </div>
             )
           })
         )}
-      </div>
 
-      {/* Botão flutuante de finalizar */}
-      {isSelectionComplete && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4">
-          <div className="max-w-4xl mx-auto">
-            <Button
-              className="w-full"
-              onClick={() => setShowConfirmDialog(true)}
-              disabled={!isAware}
-            >
-              Finalizar Seleção
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Diálogo de confirmação */}
-      <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Confirmar Seleção</DialogTitle>
-            <DialogDescription>
-              Você selecionou {selectedImages.length} imagens. Deseja finalizar a seleção?
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="flex items-start space-x-2">
+        {/* Modal de Confirmação */}
+        <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <div className="flex justify-center mb-4">
+                <AlertTriangle className="w-12 h-12 text-yellow-500" />
+              </div>
+              <DialogTitle className="text-center">Confirmar Pedido</DialogTitle>
+              <DialogDescription className="text-center">
+                Você está prestes a confirmar seu pedido com {selectedImages.length} imagens selecionadas.
+                Após a confirmação, você será redirecionado para o WhatsApp para finalizar o processo.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex items-center space-x-2 mt-4">
               <Checkbox
                 id="aware"
                 checked={isAware}
@@ -304,28 +310,38 @@ export default function CatalogPage() {
               />
               <label
                 htmlFor="aware"
-                className="text-sm text-gray-600 leading-tight"
+                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
               >
-                Estou ciente que não poderei alterar minha seleção após finalizar
+                Estou ciente que não poderei alterar minha seleção após a confirmação
               </label>
             </div>
-            <div className="flex justify-end space-x-2">
+            <div className="flex justify-end mt-6">
               <Button
-                variant="outline"
-                onClick={() => setShowConfirmDialog(false)}
-              >
-                Cancelar
-              </Button>
-              <Button
-                onClick={handleFinishSelection}
+                onClick={handleConfirmOrder}
                 disabled={!isAware}
+                className="w-full"
               >
-                Confirmar
+                Confirmar Pedido
               </Button>
             </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Botão de WhatsApp */}
+        {selectedImages.length > 0 && (
+          <div className="fixed bottom-4 left-0 right-0 flex justify-center">
+            <Button
+              size="lg"
+              className="shadow-lg"
+              onClick={() => setShowConfirmDialog(true)}
+              disabled={!isSelectionComplete}
+            >
+              <Check className="w-5 h-5 mr-2" />
+              {isSelectionComplete ? "Confirmar Pedido" : "Selecione mais imagens"}
+            </Button>
           </div>
-        </DialogContent>
-      </Dialog>
+        )}
+      </div>
     </div>
   )
 }
