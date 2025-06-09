@@ -42,11 +42,11 @@ export default function CatalogPage() {
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
   const [isAware, setIsAware] = useState(false)
   const router = useRouter()
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/catalogointerativo"
 
   useEffect(() => {
     const data = localStorage.getItem("customerData")
     if (!data) {
-      const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '/catalogointerativo'
       router.push(`${basePath}/`)
       return
     }
@@ -61,7 +61,7 @@ export default function CatalogPage() {
       console.log("Carregando dados do catálogo...")
 
       // Carregar dados do catálogo
-      const response = await fetch("/api/catalog")
+      const response = await fetch(`${basePath}/api/catalog`)
       console.log("Resposta catálogo:", response.status)
 
       if (!response.ok) {
@@ -100,7 +100,7 @@ export default function CatalogPage() {
 
     // Salvar pedido no banco
     try {
-      const response = await fetch("/api/orders", {
+      const response = await fetch(`${basePath}/api/orders`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -177,7 +177,7 @@ export default function CatalogPage() {
               <Button onClick={loadCatalogData} className="w-full">
                 Tentar Novamente
               </Button>
-              <Button variant="outline" onClick={() => router.push(`${process.env.NEXT_PUBLIC_BASE_PATH || '/catalogointerativo'}/`)} className="w-full">
+              <Button variant="outline" onClick={() => router.push(`${basePath}/`)} className="w-full">
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 Voltar ao Início
               </Button>
@@ -202,7 +202,7 @@ export default function CatalogPage() {
         <div className="max-w-4xl mx-auto">
           {/* Nav */}
           <div className="flex items-center justify-between p-4">
-            <Button variant="ghost" size="sm" onClick={() => router.push(`${process.env.NEXT_PUBLIC_BASE_PATH || '/catalogointerativo'}/`)}>
+            <Button variant="ghost" size="sm" onClick={() => router.push(`${basePath}/`)}>
               <ArrowLeft className="w-4 h-4 mr-2" />
               Voltar
             </Button>
