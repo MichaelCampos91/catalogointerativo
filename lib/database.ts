@@ -99,6 +99,28 @@ export async function getOrdersByDate(date: string): Promise<Order[]> {
   }
 }
 
+export async function createOrder(order: CreateOrder): Promise<Order> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `INSERT INTO orders (customer_name, quantity_purchased, selected_images, whatsapp_message, "order") 
+       VALUES ($1, $2, $3, $4, $5) 
+       RETURNING *`,
+      [order.customer_name, order.quantity_purchased, JSON.stringify(order.selected_images), order.whatsapp_message, order.order],
+    )
+    return {
+      ...result.rows[0],
+      selected_images: result.rows[0].selected_images,
+    }
+  } catch (error) {
+    console.error("Erro ao criar pedido:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
 // Função para testar conexão
 export async function testConnection(): Promise<boolean> {
   let client
