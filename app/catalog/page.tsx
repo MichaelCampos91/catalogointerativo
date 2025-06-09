@@ -47,7 +47,7 @@ export default function CatalogPage() {
   useEffect(() => {
     const data = localStorage.getItem("customerData")
     if (!data) {
-      router.push(`${basePath}/`)
+      router.push("/")
       return
     }
     setCustomerData(JSON.parse(data))
@@ -61,7 +61,7 @@ export default function CatalogPage() {
       console.log("Carregando dados do catálogo...")
 
       // Carregar dados do catálogo
-      const response = await fetch(`${basePath}/api/catalog`)
+      const response = await fetch("/api/catalog")
       console.log("Resposta catálogo:", response.status)
 
       if (!response.ok) {
@@ -100,7 +100,7 @@ export default function CatalogPage() {
 
     // Salvar pedido no banco
     try {
-      const response = await fetch(`${basePath}/api/orders`, {
+      const response = await fetch("/api/orders", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -177,7 +177,7 @@ export default function CatalogPage() {
               <Button onClick={loadCatalogData} className="w-full">
                 Tentar Novamente
               </Button>
-              <Button variant="outline" onClick={() => router.push(`${basePath}/`)} className="w-full">
+              <Button variant="outline" onClick={() => router.push("/")} className="w-full">
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 Voltar ao Início
               </Button>
@@ -202,7 +202,7 @@ export default function CatalogPage() {
         <div className="max-w-4xl mx-auto">
           {/* Nav */}
           <div className="flex items-center justify-between p-4">
-            <Button variant="ghost" size="sm" onClick={() => router.push(`${basePath}/`)}>
+            <Button variant="ghost" size="sm" onClick={() => router.push("/")}>
               <ArrowLeft className="w-4 h-4 mr-2" />
               Voltar
             </Button>

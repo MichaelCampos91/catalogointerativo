@@ -31,7 +31,7 @@ export default function HomePage() {
         }),
       )
       localStorage.setItem("sessionLocked", "true")
-      router.push(`${basePath}/catalog`)
+      router.push("/catalog")
     }
   }
 
@@ -128,7 +128,7 @@ export default function HomePage() {
           </Card>
 
           <div className="mt-8 text-center space-y-2">
-            <Button variant="link" onClick={() => router.push(`${basePath}/admin`)}>
+            <Button variant="link" onClick={() => router.push("/admin")}>
               Área Administrativa
             </Button>
           </div>

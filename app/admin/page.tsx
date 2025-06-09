@@ -65,7 +65,7 @@ export default function AdminPage() {
       setError(null)
       console.log("Carregando pedidos...")
 
-      const response = await fetch(`${basePath}/api/orders`)
+      const response = await fetch("/api/orders")
 
       if (!response.ok) {
         const errorData = await response.json()
@@ -92,7 +92,7 @@ export default function AdminPage() {
 
     try {
       console.log(`Filtrando pedidos por data: ${dateFilter}`)
-      const response = await fetch(`${basePath}/api/orders?date=${dateFilter}`)
+      const response = await fetch(`/api/orders?date=${dateFilter}`)
 
       if (!response.ok) {
         const errorData = await response.json()
@@ -114,7 +114,7 @@ export default function AdminPage() {
       setLoading(true)
 
       console.log("Inicializando banco de dados...")
-      const response = await fetch(`${basePath}/api/init-db`, {
+      const response = await fetch("/api/init-db", {
         method: "POST",
       })
 
@@ -190,7 +190,7 @@ export default function AdminPage() {
             <Button onClick={handleLogin} className="w-full">
               Entrar
             </Button>
-            <Button variant="outline" onClick={() => router.push(`${basePath}/`)} className="w-full">
+            <Button variant="outline" onClick={() => router.push("/")} className="w-full">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Voltar ao Início
             </Button>
@@ -226,7 +226,7 @@ export default function AdminPage() {
               <Button onClick={initializeDatabase} variant="secondary" className="w-full">
                 Inicializar Banco de Dados
               </Button>
-              <Button variant="outline" onClick={() => router.push(`${basePath}/`)} className="w-full">
+              <Button variant="outline" onClick={() => router.push("/")} className="w-full">
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 Voltar ao Início
               </Button>
@@ -246,11 +246,11 @@ export default function AdminPage() {
             <p className="text-gray-600">Gerencie os pedidos do catálogo</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => router.push(`${basePath}/admin/files`)}>
+            <Button variant="outline" onClick={() => router.push("/admin/files")}>
               <FolderOpen className="w-4 h-4 mr-2" />
               Gerenciar Arquivos
             </Button>
-            <Button variant="outline" onClick={() => router.push(`${basePath}/`)}>
+            <Button variant="outline" onClick={() => router.push("/")}>
               <ArrowLeft className="w-4 h-4 mr-2" />
               Voltar ao Início
             </Button>
