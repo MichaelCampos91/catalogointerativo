@@ -18,20 +18,58 @@ export default function HomePage() {
   const [quantity, setQuantity] = useState("")
   const [isLocked, setIsLocked] = useState(false)
   const [isFromUrl, setIsFromUrl] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
 
-  const handleStart = () => {
-    if (customerName && orderNumber && quantity && !isLocked) {
-      localStorage.setItem(
-        "customerData",
-        JSON.stringify({
-          name: customerName,
-          orderNumber,
-          quantity: Number.parseInt(quantity),
-        }),
-      )
+  const handleStart = async () => {
+    try {
+      setError(null)
+      setIsLoading(true)
+      
+      // Validações mais detalhadas
+      if (!customerName.trim()) {
+        setError("Por favor, insira seu nome")
+        setIsLoading(false)
+        return
+      }
+      
+      if (!orderNumber.trim()) {
+        setError("Por favor, insira o número do pedido")
+        setIsLoading(false)
+        return
+      }
+      
+      if (!quantity) {
+        setError("Por favor, selecione a quantidade de produtos")
+        setIsLoading(false)
+        return
+      }
+
+      // Se vier via GET params, não precisa verificar isLocked
+      if (!isFromUrl && isLocked) {
+        setError("Sessão já iniciada. Por favor, aguarde.")
+        setIsLoading(false)
+        return
+      }
+
+      // Salvar dados no localStorage
+      const customerData = {
+        name: customerName.trim(),
+        orderNumber: orderNumber.trim(),
+        quantity: Number.parseInt(quantity),
+        timestamp: new Date().toISOString()
+      }
+
+      localStorage.setItem("customerData", JSON.stringify(customerData))
       localStorage.setItem("sessionLocked", "true")
-      router.push("/catalog")
+      
+      // Navegar para o catálogo
+      await router.push("/catalog")
+    } catch (err) {
+      setError("Ocorreu um erro ao iniciar a sessão. Por favor, tente novamente.")
+      console.error("Erro ao iniciar sessão:", err)
+      setIsLoading(false)
     }
   }
 
@@ -118,12 +156,16 @@ export default function HomePage() {
 
               <Button
                 onClick={handleStart}
-                disabled={!isFormValid || (isLocked && !isFromUrl)}
+                disabled={!isFormValid || isLoading}
                 className="w-full"
                 size="lg"
               >
-                Acessar Catálogo
+                {isLoading ? "Aguarde..." : "Acessar Catálogo"}
               </Button>
+
+              {error && (
+                <p className="text-sm text-red-500 mt-2">{error}</p>
+              )}
             </CardContent>
           </Card>
 

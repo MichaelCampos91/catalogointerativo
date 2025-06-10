@@ -31,6 +31,13 @@ type CatalogImage = {
   thumbnail_url: string | null
 }
 
+type PaginationInfo = {
+  total: number
+  page: number
+  limit: number
+  totalPages: number
+}
+
 export default function CatalogPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [images, setImages] = useState<CatalogImage[]>([])
@@ -41,6 +48,14 @@ export default function CatalogPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
   const [isAware, setIsAware] = useState(false)
+  const [pagination, setPagination] = useState<PaginationInfo>({
+    total: 0,
+    page: 1,
+    limit: 50,
+    totalPages: 1
+  })
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [timeLeft, setTimeLeft] = useState<number>(24 * 60 * 60) // 24 horas em segundos
   const router = useRouter()
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/catalogointerativo"
 
@@ -53,33 +68,98 @@ export default function CatalogPage() {
     setCustomerData(JSON.parse(data))
   
     loadCatalogData()
+
+    // Inicializar o cronômetro
+    const savedTime = localStorage.getItem("catalogTimer")
+    if (savedTime) {
+      const endTime = parseInt(savedTime)
+      const now = Math.floor(Date.now() / 1000)
+      const remaining = Math.max(0, endTime - now)
+      setTimeLeft(remaining)
+    } else {
+      const endTime = Math.floor(Date.now() / 1000) + (2 * 60 * 60)
+      localStorage.setItem("catalogTimer", endTime.toString())
+    }
   }, [router])
 
-  const loadCatalogData = async () => {
+  // Efeito para atualizar o cronômetro
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 0) {
+          clearInterval(timer)
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [])
+
+  // Função para formatar o tempo restante
+  const formatTimeLeft = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`
+  }
+
+  const loadCatalogData = async (page = 1, category?: string) => {
     try {
       setError(null)
-      console.log("Carregando dados do catálogo...")
+      if (page === 1) {
+        setLoading(true)
+      } else {
+        setLoadingMore(true)
+      }
+
+      const queryParams = new URLSearchParams({
+        page: page.toString(),
+        limit: pagination.limit.toString()
+      })
+      
+      if (category) {
+        queryParams.append('category', category)
+      }
 
       // Carregar dados do catálogo
-      const response = await fetch("/api/catalog")
-      console.log("Resposta catálogo:", response.status)
+      const response = await fetch(`/api/catalog?${queryParams.toString()}`)
 
       if (!response.ok) {
         const errorData = await response.json()
-        console.error("Erro na resposta do catálogo:", errorData)
         throw new Error(`Erro ao carregar catálogo: ${errorData.message || response.status}`)
       }
 
       const data = await response.json()
-      console.log("Dados carregados:", data)
 
-      setCategories(data.categories || [])
-      setImages(data.images || [])
+      if (page === 1) {
+        setCategories(data.categories || [])
+        setImages(data.images || [])
+      } else {
+        setImages(prev => [...prev, ...data.images])
+      }
+      
+      setPagination(data.pagination)
     } catch (error) {
       console.error("Erro ao carregar dados:", error)
       setError(error instanceof Error ? error.message : "Erro desconhecido ao carregar dados")
     } finally {
       setLoading(false)
+      setLoadingMore(false)
+    }
+  }
+
+  const loadMore = () => {
+    if (pagination.page < pagination.totalPages && !loadingMore) {
+      loadCatalogData(pagination.page + 1)
+    }
+  }
+
+  // Função para detectar quando o usuário chegou ao final da página
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget
+    if (scrollHeight - scrollTop <= clientHeight * 1.5) {
+      loadMore()
     }
   }
 
@@ -156,7 +236,7 @@ export default function CatalogPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center overflow-hidden">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
           <p>Carregando catálogo...</p>
@@ -167,14 +247,14 @@ export default function CatalogPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 overflow-hidden">
         <Card className="w-full max-w-md">
           <CardContent className="p-6 text-center">
             <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
             <h2 className="text-xl font-bold mb-2">Erro ao Carregar Catálogo</h2>
             <p className="text-gray-600 mb-4">{error}</p>
             <div className="space-y-2">
-              <Button onClick={loadCatalogData} className="w-full">
+              <Button onClick={() => loadCatalogData()} className="w-full">
                 Tentar Novamente
               </Button>
               <Button variant="outline" onClick={() => router.push("/")} className="w-full">
@@ -196,7 +276,7 @@ export default function CatalogPage() {
   const filteredCategories = getFilteredCategories()
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 overflow-hidden">
       {/* Header fixo */}
       <div className="sticky top-0 bg-white border-b z-20">
         <div className="max-w-4xl mx-auto">
@@ -215,26 +295,37 @@ export default function CatalogPage() {
           </div>
 
           {/* Campo de busca fixo */}
-          <div className="px-4 pb-4">
+          <div className="px-4 pb-2">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <Input
                 type="text"
-                placeholder="Buscar categorias..."
+                placeholder="Buscar Temas..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10"
               />
             </div>
           </div>
+
+          {/* Cronômetro */}
+          <div className="px-4 pb-4 text-center">
+            <p className="text-sm text-gray-600">
+              Você tem <span className="font-bold text-indigo-600">{formatTimeLeft(timeLeft)} hrs</span> para finalizar a seleção.
+            </p>
+          </div>
         </div>
       </div>
 
-      <div className="max-w-4xl mx-auto p-4 pb-20">
+      <div 
+        className="max-w-4xl mx-auto p-4 pb-20 overflow-y-auto"
+        style={{ height: 'calc(100vh - 120px)' }}
+        onScroll={handleScroll}
+      >
         {filteredCategories.length === 0 ? (
           <div className="text-center py-12">
             <p className="text-gray-500">
-              {searchQuery ? "Nenhuma categoria encontrada para sua busca." : "Nenhuma categoria encontrada."}
+              {searchQuery ? "Nenhum resultado encontrado para sua busca." : "Nenhum tema encontrado."}
             </p>
           </div>
         ) : (
@@ -287,6 +378,13 @@ export default function CatalogPage() {
               </div>
             )
           })
+        )}
+
+        {loadingMore && (
+          <div className="text-center py-4">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto"></div>
+            <p className="text-sm text-gray-500 mt-2">Carregando mais imagens...</p>
+          </div>
         )}
 
         {/* Modal de Confirmação */}

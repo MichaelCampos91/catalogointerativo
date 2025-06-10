@@ -2,8 +2,37 @@ import { NextResponse } from "next/server"
 import fs from "fs"
 import path from "path"
 
-export async function GET() {
+// Função para ler diretório recursivamente
+async function readDirectoryRecursively(dirPath: string, basePath: string) {
+  const items = await fs.promises.readdir(dirPath, { withFileTypes: true })
+  const results = []
+
+  for (const item of items) {
+    const fullPath = path.join(dirPath, item.name)
+    const relativePath = path.relative(basePath, dirPath)
+    
+    if (item.isDirectory()) {
+      const subResults = await readDirectoryRecursively(fullPath, basePath)
+      results.push(...subResults)
+    } else if (/\.(jpg|jpeg|png|gif|webp)$/i.test(item.name)) {
+      results.push({
+        path: path.join(relativePath, item.name),
+        name: item.name,
+        category: relativePath || 'root'
+      })
+    }
+  }
+
+  return results
+}
+
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url)
+    const page = parseInt(searchParams.get('page') || '1')
+    const limit = parseInt(searchParams.get('limit') || '50')
+    const category = searchParams.get('category')
+
     const basePath = path.join(process.cwd(), "public", "files")
     
     // Verificar se o diretório existe
@@ -11,41 +40,52 @@ export async function GET() {
       return NextResponse.json({ error: "Diretório não encontrado" }, { status: 404 })
     }
 
-    // Ler o conteúdo do diretório
-    const items = fs.readdirSync(basePath, { withFileTypes: true })
+    // Ler todas as imagens recursivamente
+    const allImages = await readDirectoryRecursively(basePath, basePath)
     
-    // Filtrar apenas diretórios (categorias)
-    const categories = items
-      .filter(item => item.isDirectory())
-      .map((dir, index) => ({
-        id: `cat_${index + 1}`,
-        name: dir.name,
-        slug: dir.name.toLowerCase().replace(/\s+/g, '-')
-      }))
+    // Agrupar por categoria
+    const categoriesMap = new Map()
+    allImages.forEach(img => {
+      if (!categoriesMap.has(img.category)) {
+        categoriesMap.set(img.category, {
+          id: `cat_${categoriesMap.size + 1}`,
+          name: img.category === 'root' ? 'Geral' : img.category,
+          slug: img.category.toLowerCase().replace(/\s+/g, '-')
+        })
+      }
+    })
 
-    // Para cada categoria, buscar as imagens
-    const images = []
-    for (const category of categories) {
-      const categoryPath = path.join(basePath, category.name)
-      const categoryItems = fs.readdirSync(categoryPath, { withFileTypes: true })
-      
-      // Filtrar apenas arquivos de imagem
-      const categoryImages = categoryItems
-        .filter(item => !item.isDirectory() && /\.(jpg|jpeg|png|gif|webp)$/i.test(item.name))
-        .map((file, index) => ({
-          id: `img_${category.id}_${index + 1}`,
-          code: path.parse(file.name).name, // Nome do arquivo sem extensão
-          category_id: category.id,
-          image_url: `/files/${category.name}/${file.name}`,
-          thumbnail_url: `/files/${category.name}/${file.name}`
-        }))
+    const categories = Array.from(categoriesMap.values())
 
-      images.push(...categoryImages)
+    // Filtrar por categoria se especificado
+    let filteredImages = allImages
+    if (category) {
+      filteredImages = allImages.filter(img => img.category === category)
     }
+
+    // Aplicar paginação
+    const startIndex = (page - 1) * limit
+    const endIndex = startIndex + limit
+    const paginatedImages = filteredImages.slice(startIndex, endIndex)
+
+    // Transformar imagens no formato esperado
+    const images = paginatedImages.map((img, index) => ({
+      id: `img_${index + 1}`,
+      code: path.parse(img.name).name,
+      category_id: categoriesMap.get(img.category).id,
+      image_url: `/files/${img.path}`,
+      thumbnail_url: `/files/${img.path}`
+    }))
 
     return NextResponse.json({
       categories,
-      images
+      images,
+      pagination: {
+        total: filteredImages.length,
+        page,
+        limit,
+        totalPages: Math.ceil(filteredImages.length / limit)
+      }
     })
   } catch (error) {
     console.error("Erro ao carregar catálogo:", error)
