@@ -168,12 +168,6 @@ export default function HomePage() {
               )}
             </CardContent>
           </Card>
-
-          <div className="mt-8 text-center space-y-2">
-            <Button variant="link" onClick={() => router.push("/admin")}>
-              Área Administrativa
-            </Button>
-          </div>
         </div>
       </div>
     </Suspense>

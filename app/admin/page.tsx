@@ -9,7 +9,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Download, Calendar, User, Package, ArrowLeft, AlertCircle, FolderOpen, Copy, Check, ChevronDown, Image } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { Toaster } from "sonner"
 import { useToast } from "@/hooks/use-sonner-toast"
 import {
   DropdownMenu,
@@ -41,7 +40,7 @@ export default function AdminPage() {
   const [downloadingOrder, setDownloadingOrder] = useState<string | null>(null)
 
   // Usar variável de ambiente pública para a senha (em produção, use autenticação adequada)
-  const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "admin123"
+  const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || ""
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -223,14 +222,14 @@ export default function AdminPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="password">Senha</Label>
+              <Label htmlFor="password">Senha Admin</Label>
               <Input
                 id="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-                placeholder={`Senha padrão: ${ADMIN_PASSWORD}`}
+                placeholder="Digite a senha"
               />
             </div>
             <Button onClick={handleLogin} className="w-full">
@@ -301,8 +300,8 @@ export default function AdminPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">Total de Pedidos</p>
-                  <p className="text-2xl font-bold">{filteredOrders.length}</p>
+                  <p className="text-xs text-gray-500 mb-2">Total de Pedidos</p>
+                  <p className="text-xl font-bold">{filteredOrders.length}</p>
                 </div>
                 <Package className="w-8 h-8 text-indigo-600" />
               </div>
@@ -312,8 +311,8 @@ export default function AdminPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">Total de Clientes</p>
-                  <p className="text-2xl font-bold">
+                  <p className="text-xs text-gray-500 mb-2">Total de Clientes</p>
+                  <p className="text-xl font-bold">
                     {new Set(filteredOrders.map(order => order.customer_name)).size}
                   </p>
                 </div>
@@ -325,8 +324,9 @@ export default function AdminPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">Filtrar por Data</p>
+                  <p className="text-xs text-gray-500 mb-2">Filtrar por Data</p>
                   <Input
+                    className="text-xs"
                     id="date"
                     type="date"
                     value={dateFilter}
@@ -363,11 +363,11 @@ export default function AdminPage() {
         {/* Tabela de pedidos */}
         <Card>
           <CardHeader>
-            <CardTitle>Lista de Pedidos</CardTitle>
-            <CardDescription>{filteredOrders.length} pedido(s) encontrado(s)</CardDescription>
+            <CardTitle className="text-lg font-bold">Lista de Pedidos</CardTitle>
+            <CardDescription className="text-sm">{filteredOrders.length} pedido(s) encontrado(s)</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto overflow-y-auto max-h-[320px]">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -377,7 +377,7 @@ export default function AdminPage() {
                     <TableHead>Ações</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody>
+                <TableBody className="overflow-y-auto h-[300px]">
                   {filteredOrders.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={4} className="text-center py-4 text-gray-500">
