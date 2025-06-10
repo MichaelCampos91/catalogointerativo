@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Download, Calendar, User, Package, ArrowLeft, AlertCircle, FolderOpen, Copy, Check, ChevronDown } from "lucide-react"
+import { Download, Calendar, User, Package, ArrowLeft, AlertCircle, FolderOpen, Copy, Check, ChevronDown, Image } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { Toaster } from "sonner"
 import { useToast } from "@/hooks/use-sonner-toast"
@@ -38,6 +38,7 @@ export default function AdminPage() {
   const router = useRouter()
   const toast = useToast()
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/catalogointerativo"
+  const [downloadingOrder, setDownloadingOrder] = useState<string | null>(null)
 
   // Usar variável de ambiente pública para a senha (em produção, use autenticação adequada)
   const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "admin123"
@@ -135,10 +136,55 @@ export default function AdminPage() {
     }
   }
 
-  const downloadOrderFiles = async (selectedImages: string[]) => {
-    // Em uma implementação real, você faria o download dos arquivos
-    // Por enquanto, apenas mostramos um alerta
-    alert(`Download iniciado para ${selectedImages.length} arquivos:\n${selectedImages.join(", ")}`)
+  const downloadOrderFiles = async (order: Order) => {
+    try {
+      setDownloadingOrder(order.id)
+      
+      // Preparar download
+      const response = await fetch("/api/download", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          selectedImages: order.selected_images,
+          customerName: order.customer_name,
+          orderNumber: order.order,
+          date: order.created_at
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.message || "Erro ao preparar download")
+      }
+
+      const data = await response.json()
+      
+      if (data.foundFiles === 0) {
+        toast.error({
+          title: "Nenhum arquivo encontrado",
+          description: "Não foi possível encontrar os arquivos selecionados",
+        })
+        return
+      }
+
+      // Iniciar download
+      window.location.href = data.zipPath
+      
+      toast.success({
+        title: "Download iniciado",
+        description: `${data.foundFiles} arquivos encontrados`,
+      })
+    } catch (error) {
+      console.error("Erro ao fazer download:", error)
+      toast.error({
+        title: "Erro ao fazer download",
+        description: error instanceof Error ? error.message : "Erro desconhecido",
+      })
+    } finally {
+      setDownloadingOrder(null)
+    }
   }
 
   const formatDate = (dateString: string) => {
@@ -189,10 +235,6 @@ export default function AdminPage() {
             </div>
             <Button onClick={handleLogin} className="w-full">
               Entrar
-            </Button>
-            <Button variant="outline" onClick={() => router.push("/")} className="w-full">
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Voltar ao Início
             </Button>
           </CardContent>
         </Card>
@@ -250,81 +292,73 @@ export default function AdminPage() {
               <FolderOpen className="w-4 h-4 mr-2" />
               Gerenciar Arquivos
             </Button>
-            <Button variant="outline" onClick={() => router.push("/")}>
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Voltar ao Início
-            </Button>
           </div>
         </div>
 
-        {/* Estatísticas */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        {/* Resumo das quantidades */}
+        <div className="grid grid-cols-3 gap-4 mb-6">
           <Card>
             <CardContent className="p-4">
-              <div className="flex items-center">
-                <Package className="w-8 h-8 text-indigo-600 mr-3" />
+              <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-600">Total de Pedidos</p>
-                  <p className="text-2xl font-bold">{orders.length}</p>
+                  <p className="text-sm text-gray-500">Total de Pedidos</p>
+                  <p className="text-2xl font-bold">{filteredOrders.length}</p>
                 </div>
+                <Package className="w-8 h-8 text-indigo-600" />
               </div>
             </CardContent>
           </Card>
-
           <Card>
             <CardContent className="p-4">
-              <div className="flex items-center">
-                <User className="w-8 h-8 text-green-600 mr-3" />
+              <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-600">Clientes Únicos</p>
-                  <p className="text-2xl font-bold">{new Set(orders.map((o) => o.customer_name)).size}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center">
-                <Download className="w-8 h-8 text-orange-600 mr-3" />
-                <div>
-                  <p className="text-sm text-gray-600">Imagens Selecionadas</p>
+                  <p className="text-sm text-gray-500">Total de Clientes</p>
                   <p className="text-2xl font-bold">
-                    {orders.reduce((acc, order) => acc + order.selected_images.length, 0)}
+                    {new Set(filteredOrders.map(order => order.customer_name)).size}
                   </p>
                 </div>
+                <User className="w-8 h-8 text-indigo-600" />
               </div>
             </CardContent>
           </Card>
-        </div>
-
-        {/* Filtros */}
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Calendar className="w-5 h-5" />
-              Filtros
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex gap-4">
-              <div className="flex-1">
-                <Label htmlFor="date-filter">Filtrar por data</Label>
-                <Input
-                  id="date-filter"
-                  type="date"
-                  value={dateFilter}
-                  onChange={(e) => setDateFilter(e.target.value)}
-                />
-              </div>
-              <div className="flex items-end">
-                <Button variant="outline" onClick={() => setDateFilter("")}>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Filtrar por Data</p>
+                  <Input
+                    id="date"
+                    type="date"
+                    value={dateFilter}
+                    onChange={(e) => setDateFilter(e.target.value)}
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => setDateFilter("")}
+                  className="mt-6"
+                >
                   Limpar Filtro
                 </Button>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+          {/* Total de Itens 
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Total de Itens</p>
+                  <p className="text-2xl font-bold">
+                    {filteredOrders.reduce((total, order) => total + order.selected_images.length, 0)}
+                  </p>
+                </div>
+                <Image className="w-8 h-8 text-indigo-600" />
+              </div>
+            </CardContent>
+          </Card>
+          */}
+        </div>
 
         {/* Tabela de pedidos */}
         <Card>
@@ -384,7 +418,7 @@ export default function AdminPage() {
                                     onClick={() => copyAllImages(order.selected_images)}
                                   >
                                     <Copy className="h-4 w-4 mr-1" />
-                                    Copiar Tudo
+                                    Copiar Lista
                                   </Button>
                                 </div>
                                 {order.selected_images.map((code) => (
@@ -400,9 +434,13 @@ export default function AdminPage() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Button size="sm" onClick={() => downloadOrderFiles(order.selected_images)}>
+                          <Button 
+                            size="sm" 
+                            onClick={() => downloadOrderFiles(order)}
+                            disabled={downloadingOrder === order.id}
+                          >
                             <Download className="w-4 h-4 mr-2" />
-                            Download
+                            {downloadingOrder === order.id ? "Aguarde..." : "Download"}
                           </Button>
                         </TableCell>
                       </TableRow>
