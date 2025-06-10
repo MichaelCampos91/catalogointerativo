@@ -257,7 +257,7 @@ export default function CatalogPage() {
               <Button onClick={() => loadCatalogData()} className="w-full">
                 Tentar Novamente
               </Button>
-              <Button variant="outline" onClick={() => router.push("/")} className="w-full">
+              <Button variant="outline" onClick={() => router.push("/catalog")} className="w-full">
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 Voltar ao Início
               </Button>
@@ -282,7 +282,7 @@ export default function CatalogPage() {
         <div className="max-w-4xl mx-auto">
           {/* Nav */}
           <div className="flex items-center justify-between p-4">
-            <Button variant="ghost" size="sm" onClick={() => router.push("/")}>
+            <Button variant="ghost" size="sm" onClick={() => router.push("/catalog")}>
               <ArrowLeft className="w-4 h-4 mr-2" />
               Voltar
             </Button>
