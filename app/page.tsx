@@ -52,7 +52,7 @@ export default function HomePage() {
         setError("Sessão já iniciada. Por favor, aguarde.")
         setIsLoading(false)
         return
-      }
+      } 
 
       // Salvar dados no localStorage
       const customerData = {
@@ -93,9 +93,9 @@ export default function HomePage() {
         <div className="max-w-md mx-auto pt-8">
           <div className="text-center mb-8">
             <div className="w-16 h-16 bg-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Image className="w-[120px]" src="https://cdn.dooca.store/142264/files/logo-cenario-2024-colorida-fundo-transparente.png?v=1700832681" alt="Logo"/>
+              <img className="w-[120px]" src="https://cdn.dooca.store/142264/files/logo-cenario-2024-colorida-fundo-transparente.png?v=1700832681" alt="Logo"/>
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">Catalogo Cenario</h1>
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">Catálogo Cenario</h1>
             <p className="text-gray-600">Selecione os temas no nosso catálogo:</p>
           </div>
 
