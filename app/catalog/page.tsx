@@ -216,7 +216,7 @@ export default function CatalogPage() {
       setIsAware(false)
 
       // Redirecionar para outro site
-      router.push("https://www.descubralojacenario.com.br")
+      router.push("https://descubra.lojacenario.com.br/")
     } catch (error) {
       console.error("Erro ao salvar pedido:", error)
       setError(error instanceof Error ? error.message : "Erro ao salvar pedido")
