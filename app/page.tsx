@@ -10,6 +10,7 @@ import { ShoppingBag, User, Lock } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { Suspense } from "react"
 import { CustomerInitializer } from "@/components/CustomerInitializer"
+import Image from "next/image"
 
 export default function HomePage() {
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '/catalogointerativo'
@@ -88,14 +89,14 @@ export default function HomePage() {
         }}
       />
 
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+      <div className="min-h-screen bg-gray-100">
         <div className="max-w-md mx-auto pt-8">
           <div className="text-center mb-8">
             <div className="w-16 h-16 bg-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
-              <ShoppingBag className="w-8 h-8 text-white" />
+              <Image className="w-[120px]" src="https://cdn.dooca.store/142264/files/logo-cenario-2024-colorida-fundo-transparente.png?v=1700832681" alt="Logo"/>
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">{appName}</h1>
-            <p className="text-gray-600">Selecione os temas no nosso catálogo</p>
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">Catalogo Cenario</h1>
+            <p className="text-gray-600">Selecione os temas no nosso catálogo:</p>
           </div>
 
           <Card>

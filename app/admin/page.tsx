@@ -475,6 +475,7 @@ export default function AdminPage() {
                             <Download className="w-4 h-4 mr-2" />
                             {downloadingOrder === order.id ? "Aguarde..." : "Download"}
                           </Button>
+                          <br/>
                           {order.is_pending && (
                             <>
                               <Button
