@@ -158,7 +158,7 @@ export default function HomePage() {
               <Button
                 onClick={handleStart}
                 disabled={!isFormValid || isLoading}
-                className="w-full"
+                className="w-full bg-[#ff007b] text-white"
                 size="lg"
               >
                 {isLoading ? "Aguarde..." : "Acessar Catálogo"}
