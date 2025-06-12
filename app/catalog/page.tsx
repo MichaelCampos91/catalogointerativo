@@ -16,6 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { toast } from "sonner"
 
 type Category = {
   id: string
@@ -205,15 +206,17 @@ export default function CatalogPage() {
       localStorage.removeItem("sessionLocked")
 
       // Abrir WhatsApp após salvar com sucesso
-      const whatsappUrl = `https://wa.me/?phone=5518997003934&text=${encodeURIComponent(message)}`
-      window.open(whatsappUrl, "_blank")
+      //const whatsappUrl = `https://wa.me/?phone=5518997003934&text=${encodeURIComponent(message)}`
+      //window.open(whatsappUrl, "_blank")
+
+      toast.success("Seu pedido foi confirmado! Conheça outros produtos em nossa loja...")
       
       // Fechar o modal
       setShowConfirmDialog(false)
       setIsAware(false)
 
       // Redirecionar para outro site
-      router.push("https://descubra.lojacenario.com.br")
+      router.push("https://lojacenario.com.br")
     } catch (error) {
       console.error("Erro ao salvar pedido:", error)
       setError(error instanceof Error ? error.message : "Erro ao salvar pedido")

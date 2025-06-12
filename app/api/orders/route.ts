@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createOrder, getOrders, getOrdersByDate } from "@/lib/database"
+import { createOrder, getOrders, getOrdersByDate, updateOrderStatus } from "@/lib/database"
 
 export async function POST(request: Request) {
   try {
@@ -37,6 +37,32 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         error: "Erro interno do servidor",
+        message: error instanceof Error ? error.message : "Erro desconhecido",
+        timestamp: new Date().toISOString(),
+      },
+      { status: 500 },
+    )
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const body = await request.json()
+    const { id } = body
+
+    if (!id) {
+      return NextResponse.json({ error: "ID do pedido é obrigatório" }, { status: 400 })
+    }
+
+    console.log(`API: Concluindo pedido ${id}...`)
+    const updatedOrder = await updateOrderStatus(id, false)
+
+    return NextResponse.json(updatedOrder)
+  } catch (error) {
+    console.error("API: Erro ao concluir pedido:", error)
+    return NextResponse.json(
+      {
+        error: "Erro ao concluir pedido",
         message: error instanceof Error ? error.message : "Erro desconhecido",
         timestamp: new Date().toISOString(),
       },

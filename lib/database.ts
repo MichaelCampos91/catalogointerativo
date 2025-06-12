@@ -136,6 +136,8 @@ export async function testConnection(): Promise<boolean> {
   }
 }
 
+
+
 // Função para obter informações de configuração
 export function getDatabaseConfig() {
   return {
@@ -144,5 +146,31 @@ export function getDatabaseConfig() {
     database: process.env.DB_NAME ? "✅ Definido" : "❌ Não definido",
     user: process.env.DB_USER ? "✅ Definido" : "❌ Não definido",
     password: process.env.DB_PASSWORD ? "✅ Definido" : "❌ Não definido",
+  }
+}
+
+export async function updateOrderStatus(id: string, isPending: boolean): Promise<Order> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `UPDATE orders 
+       SET is_pending = $1 
+       WHERE id = $2 
+       RETURNING *`,
+      [isPending, id],
+    )
+    if (result.rows.length === 0) {
+      throw new Error("Pedido não encontrado")
+    }
+    return {
+      ...result.rows[0],
+      selected_images: result.rows[0].selected_images,
+    }
+  } catch (error) {
+    console.error("Erro ao atualizar status do pedido:", error)
+    throw error
+  } finally {
+    if (client) client.release()
   }
 }

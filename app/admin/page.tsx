@@ -17,6 +17,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
+import {
+  Dialog,
+  DialogTrigger,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog"
+
 type Order = {
   id: string
   customer_name: string
@@ -24,6 +33,7 @@ type Order = {
   selected_images: string[]
   created_at: string
   order: string
+  is_pending: boolean
 }
 
 export default function AdminPage() {
@@ -38,6 +48,9 @@ export default function AdminPage() {
   const toast = useToast()
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/catalogointerativo"
   const [downloadingOrder, setDownloadingOrder] = useState<string | null>(null)
+  const [filterPending, setFilterPending] = useState<"all" | "pending">("all")
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false)
+  const [selectedOrderToClose, setSelectedOrderToClose] = useState<Order | null>(null)
 
   // Usar variável de ambiente pública para a senha (em produção, use autenticação adequada)
   const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || ""
@@ -50,7 +63,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     filterOrders()
-  }, [orders, dateFilter])
+  }, [orders, dateFilter, filterPending])
 
   const handleLogin = () => {
     if (password === ADMIN_PASSWORD) {
@@ -85,28 +98,32 @@ export default function AdminPage() {
   }
 
   const filterOrders = async () => {
-    if (!dateFilter) {
+    if (!dateFilter && filterPending === "all") {
       setFilteredOrders(orders)
       return
     }
-
-    try {
-      console.log(`Filtrando pedidos por data: ${dateFilter}`)
-      const response = await fetch(`/api/orders?date=${dateFilter}`)
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(`Erro ao filtrar pedidos: ${errorData.message || response.status}`)
+  
+    let filtered = orders
+  
+    if (dateFilter) {
+      try {
+        const response = await fetch(`/api/orders?date=${dateFilter}`)
+        if (!response.ok) throw new Error("Erro ao filtrar por data")
+        filtered = await response.json()
+      } catch (error) {
+        console.error("Erro ao filtrar por data:", error)
+        setError(error instanceof Error ? error.message : "Erro desconhecido")
+        return
       }
-
-      const filtered = await response.json()
-      console.log(`${filtered.length} pedidos filtrados`)
-      setFilteredOrders(filtered || [])
-    } catch (error) {
-      console.error("Erro ao filtrar pedidos:", error)
-      setError(error instanceof Error ? error.message : "Erro desconhecido")
     }
+  
+    if (filterPending === "pending") {
+      filtered = filtered.filter((order) => order.is_pending)
+    }
+  
+    setFilteredOrders(filtered)
   }
+  
 
   const initializeDatabase = async () => {
     try {
@@ -291,6 +308,22 @@ export default function AdminPage() {
               <FolderOpen className="w-4 h-4 mr-2" />
               Gerenciar Arquivos
             </Button>
+            <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="ml-2">
+                {filterPending === "pending" ? "Somente Pendentes" : "Todos os Pedidos"}
+                <ChevronDown className="ml-2 h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => setFilterPending("all")}>
+                Todos os Pedidos
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setFilterPending("pending")}>
+                Somente Pendentes
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           </div>
         </div>
 
@@ -442,6 +475,21 @@ export default function AdminPage() {
                             <Download className="w-4 h-4 mr-2" />
                             {downloadingOrder === order.id ? "Aguarde..." : "Download"}
                           </Button>
+                          {order.is_pending && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="mt-2"
+                                onClick={() => {
+                                  setSelectedOrderToClose(order)
+                                  setConfirmDialogOpen(true)
+                                }}
+                              >
+                                Concluir Pedido
+                              </Button>
+                            </>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))
@@ -452,6 +500,58 @@ export default function AdminPage() {
           </CardContent>
         </Card>
       </div>
+      <Dialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Concluir Pedido?</DialogTitle>
+          </DialogHeader>
+          <p>Tem certeza que deseja marcar este pedido como concluído?</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!selectedOrderToClose) return
+                try {
+                  const response = await fetch("/api/orders", {
+                    method: "PATCH",
+                    headers: {
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({ id: selectedOrderToClose.id }),
+                  })
+      
+                  if (!response.ok) throw new Error("Erro ao concluir pedido")
+      
+                  const updated = await response.json()
+      
+                  setOrders((prev) =>
+                    prev.map((order) =>
+                      order.id === updated.id ? updated : order
+                    )
+                  )
+      
+                  toast.success({
+                    title: "Pedido concluído",
+                    description: "O pedido foi marcado como concluído",
+                  })
+                } catch (err) {
+                  toast.error({
+                    title: "Erro",
+                    description: "Não foi possível concluir o pedido",
+                  })
+                } finally {
+                  setConfirmDialogOpen(false)
+                  setSelectedOrderToClose(null)
+                }
+              }}
+            >
+              Confirmar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
