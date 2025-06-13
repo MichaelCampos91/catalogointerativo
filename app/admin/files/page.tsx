@@ -132,10 +132,10 @@ export default function FilesPage() {
                 placeholder={`Senha padrão: ${ADMIN_PASSWORD}`}
               />
             </div>
-            <Button onClick={handleLogin} className="w-full">
+            <Button onClick={handleLogin} className="w-full bg-primary text-primary-foreground">
               Entrar
             </Button>
-            <Button variant="outline" onClick={() => router.push("/admin")} className="w-full">
+            <Button variant="outline" onClick={() => router.push("/admin")} className="w-full bg-primary text-primary-foreground">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Voltar ao Painel
             </Button>
@@ -158,7 +158,7 @@ export default function FilesPage() {
               <RefreshCw className="w-4 h-4 mr-2" />
               Atualizar
             </Button>
-            <Button variant="outline" onClick={() => router.push("/admin")}>
+            <Button className="bg-primary text-primary-foreground" variant="outline" onClick={() => router.push("/admin")}>
               <ArrowLeft className="w-4 h-4 mr-2" />
               Voltar ao Painel
             </Button>

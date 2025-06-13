@@ -32,6 +32,7 @@ type Order = {
   quantity_purchased: number
   selected_images: string[]
   created_at: string
+  updated_at: string
   order: string
   is_pending: boolean
 }
@@ -249,7 +250,7 @@ export default function AdminPage() {
                 placeholder="Digite a senha"
               />
             </div>
-            <Button onClick={handleLogin} className="w-full">
+            <Button onClick={handleLogin} className="w-full bg-primary text-primary-foreground">
               Entrar
             </Button>
           </CardContent>
@@ -432,7 +433,24 @@ export default function AdminPage() {
                             </button>
                           </div>
                         </TableCell>
-                        <TableCell>{formatDate(order.created_at)}</TableCell>
+                        <TableCell>
+                          <p className="text-xs text-gray-700 mt-2">
+                            <span className="font-medium text-gray-600">
+                              🆕 Criado em:
+                            </span>
+                            <br/>
+                            {formatDate(order.created_at)}
+                          </p>
+                          {!order.is_pending && (
+                            <p className="text-xs text-gray-700 mt-2">
+                              <span className="font-medium text-gray-600">
+                                ✅ Concluído em:
+                              </span>
+                              <br/>
+                              {formatDate(order.updated_at)}
+                            </p>
+                          )}
+                        </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <Badge variant="secondary">{order.quantity_purchased} produtos</Badge>
@@ -467,30 +485,33 @@ export default function AdminPage() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Button 
-                            size="sm" 
-                            onClick={() => downloadOrderFiles(order)}
-                            disabled={downloadingOrder === order.id}
-                          >
-                            <Download className="w-4 h-4 mr-2" />
-                            {downloadingOrder === order.id ? "Aguarde..." : "Download"}
-                          </Button>
-                          <br/>
-                          {order.is_pending && (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="mt-2"
-                                onClick={() => {
-                                  setSelectedOrderToClose(order)
-                                  setConfirmDialogOpen(true)
-                                }}
-                              >
-                                Concluir Pedido
-                              </Button>
-                            </>
-                          )}
+                          <div className="flex items-center gap-2"> 
+                            <Button 
+                              size="sm" 
+                              onClick={() => downloadOrderFiles(order)}
+                              disabled={downloadingOrder === order.id}
+                              className="bg-primary text-primary-foreground"
+                            >
+                              <Download className="w-4 h-4" />
+                              {downloadingOrder === order.id ? "Aguarde..." : "Baixar"}
+                            </Button>
+                            {order.is_pending && (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="ml-2"
+                                  onClick={() => {
+                                    setSelectedOrderToClose(order)
+                                    setConfirmDialogOpen(true)
+                                  }}
+                                >
+                                  <Check className="w-4 h-4" />
+                                  Concluir
+                                </Button>
+                              </>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))

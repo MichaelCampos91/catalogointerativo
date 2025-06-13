@@ -92,24 +92,22 @@ export default function HomePage() {
       <div className="min-h-screen bg-gray-100">
         <div className="max-w-md mx-auto pt-8">
           <div className="text-center mb-8">
-            <div className="w-[120px] flex items-center justify-center mx-auto mb-4">
-              <img className="w-[120px]" src="https://cdn.dooca.store/142264/files/logo-cenario-2024-colorida-fundo-transparente.png?v=1700832681" alt="Logo"/>
+            <div className="w-[150px] flex items-center justify-center mx-auto mb-4">
+              <img className="w-[150px]" src="https://cdn.dooca.store/142264/files/logo-cenario-2024-colorida-fundo-transparente.png?v=1700832681" alt="Logo"/>
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">Catálogo Cenario</h1>
-            <p className="text-gray-600">Selecione os temas no nosso catálogo:</p>
           </div>
 
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
+              <CardTitle className="flex items-center justify-center gap-2">
                 <User className="w-5 h-5" />
                 Informações Iniciais
                 {isLocked && <Lock className="w-4 h-4 text-gray-400" />}
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-center">
                 {isLocked
                   ? "Informações carregadas automaticamente"
-                  : "Preencha seus dados para acessar o catálogo"}
+                  : "Clique no botão abaixo para acessar o catálogo"}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -136,7 +134,7 @@ export default function HomePage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="quantity">Quantos produtos você comprou?</Label>
+                <Label htmlFor="quantity">Quantidade de Itens do pedido:</Label>
                 <Select
                   value={quantity}
                   onValueChange={(value) => !isLocked && setQuantity(value)}
@@ -158,7 +156,7 @@ export default function HomePage() {
               <Button
                 onClick={handleStart}
                 disabled={!isFormValid || isLoading}
-                className="w-full bg-[#ff007b] text-white"
+                className="w-full bg-primary text-primary-foreground"
                 size="lg"
               >
                 {isLoading ? "Aguarde..." : "Acessar Catálogo"}

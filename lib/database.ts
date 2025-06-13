@@ -26,22 +26,6 @@ if (!process.env.DB_HOST || !process.env.DB_NAME || !process.env.DB_USER || !pro
   console.error("Certifique-se de que DB_HOST, DB_NAME, DB_USER e DB_PASSWORD estão no arquivo .env.local")
 }
 
-export type Category = {
-  id: string
-  name: string
-  slug: string
-  created_at: string
-}
-
-export type CatalogImage = {
-  id: string
-  code: string
-  category_id: string
-  image_url: string
-  thumbnail_url: string | null
-  created_at: string
-}
-
 export type Order = {
   id: string
   customer_name: string
@@ -49,6 +33,8 @@ export type Order = {
   selected_images: string[]
   whatsapp_message: string | null
   created_at: string
+  updated_at: string
+  is_pending: boolean
 }
 
 export type CreateOrder = {
@@ -68,6 +54,7 @@ export async function getOrders(): Promise<Order[]> {
     return result.rows.map((row) => ({
       ...row,
       selected_images: row.selected_images,
+      updated_at: row.updated_at, // garante consistência com o tipo Order
     }))
   } catch (error) {
     console.error("Erro ao buscar pedidos:", error)
@@ -77,6 +64,7 @@ export async function getOrders(): Promise<Order[]> {
   }
 }
 
+// Função para buscar pedidos por data
 export async function getOrdersByDate(date: string): Promise<Order[]> {
   let client
   try {
@@ -99,6 +87,7 @@ export async function getOrdersByDate(date: string): Promise<Order[]> {
   }
 }
 
+// Função para criar um novo pedido
 export async function createOrder(order: CreateOrder): Promise<Order> {
   let client
   try {
@@ -136,8 +125,6 @@ export async function testConnection(): Promise<boolean> {
   }
 }
 
-
-
 // Função para obter informações de configuração
 export function getDatabaseConfig() {
   return {
@@ -149,13 +136,14 @@ export function getDatabaseConfig() {
   }
 }
 
+// Função para atualizar o status do pedido
 export async function updateOrderStatus(id: string, isPending: boolean): Promise<Order> {
   let client
   try {
     client = await pool.connect()
     const result = await client.query(
       `UPDATE orders 
-       SET is_pending = $1 
+       SET is_pending = $1, updated_at = NOW()
        WHERE id = $2 
        RETURNING *`,
       [isPending, id],
@@ -166,6 +154,7 @@ export async function updateOrderStatus(id: string, isPending: boolean): Promise
     return {
       ...result.rows[0],
       selected_images: result.rows[0].selected_images,
+      updated_at: result.rows[0].updated_at,
     }
   } catch (error) {
     console.error("Erro ao atualizar status do pedido:", error)
@@ -174,3 +163,4 @@ export async function updateOrderStatus(id: string, isPending: boolean): Promise
     if (client) client.release()
   }
 }
+
