@@ -54,7 +54,7 @@ export async function getOrders(): Promise<Order[]> {
     return result.rows.map((row) => ({
       ...row,
       selected_images: row.selected_images,
-      updated_at: row.updated_at, // garante consistência com o tipo Order
+      updated_at: row.updated_at, 
     }))
   } catch (error) {
     console.error("Erro ao buscar pedidos:", error)
