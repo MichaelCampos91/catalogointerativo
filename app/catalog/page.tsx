@@ -364,6 +364,9 @@ export default function CatalogPage() {
                                   src={image.image_url}
                                   alt={image.code}
                                   className="object-cover w-full h-full"
+                                  onContextMenu={(e) => e.preventDefault()}
+                                  draggable="false"
+                                  style={{ userSelect: 'none' }}
                                 />
                                 {isSelected && (
                                   <div className="absolute inset-0 bg-indigo-500 bg-opacity-20 flex items-center justify-center">
