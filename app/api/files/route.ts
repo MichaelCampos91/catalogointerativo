@@ -11,7 +11,9 @@ function validatePath(dir: string) {
     return basePath
   }
   
-  const targetPath = path.join(basePath, dir)
+  // Remover "files/" do início do caminho se existir
+  const cleanDir = dir.startsWith("files/") ? dir.slice(6) : dir
+  const targetPath = path.join(basePath, cleanDir)
   
   // Verifica se o caminho está dentro da pasta base
   if (!targetPath.startsWith(basePath)) {

@@ -232,24 +232,29 @@ export default function FilesPage() {
 
     try {
       setLoading(true)
-      const formData = new FormData()
-      formData.append("action", "upload")
-      formData.append("dir", currentDir)
-      formData.append("file", files[0])
+      const cleanDir = currentDir.startsWith("files/") ? currentDir.slice(6) : currentDir
+      
+      // Processar cada arquivo
+      for (let i = 0; i < files.length; i++) {
+        const formData = new FormData()
+        formData.append("action", "upload")
+        formData.append("dir", cleanDir)
+        formData.append("file", files[i])
 
-      const response = await fetch("/api/files", {
-        method: "POST",
-        body: formData,
-      })
+        const response = await fetch("/api/files", {
+          method: "POST",
+          body: formData,
+        })
 
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.message || "Erro ao fazer upload do arquivo")
+        if (!response.ok) {
+          const error = await response.json()
+          throw new Error(error.message || "Erro ao fazer upload do arquivo")
+        }
       }
 
       toast({
         title: "Sucesso",
-        description: "Arquivo enviado com sucesso",
+        description: `${files.length} arquivo(s) enviado(s) com sucesso`,
       })
       loadFiles()
     } catch (error) {
@@ -346,6 +351,7 @@ export default function FilesPage() {
           ref={fileInputRef}
           onChange={handleFileUpload}
           className="hidden"
+          multiple
         />
 
         {/* Breadcrumbs */}
