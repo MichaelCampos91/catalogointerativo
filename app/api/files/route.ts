@@ -114,10 +114,14 @@ export async function POST(request: Request) {
 
         const bytes = await file.arrayBuffer()
         const buffer = Buffer.from(bytes)
-        const fileName = file.name
-        const filePath = path.join(targetPath, fileName)
+        const filePath = path.join(targetPath, file.name)
 
-        await writeFile(filePath, buffer)
+        fs.writeFileSync(filePath, buffer)
+
+        // Definir permissões do arquivo como 664 (rw-rw-r--)
+        fs.chmodSync(filePath, 0o664)
+
+        console.log("Backend: Arquivo salvo com sucesso", { filePath })
         return NextResponse.json({ message: "Arquivo enviado com sucesso" })
       }
 
