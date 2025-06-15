@@ -44,7 +44,7 @@ export async function GET(request: Request) {
         name: item.name,
         path: itemPath,
         isDirectory: item.isDirectory(),
-        url: item.isDirectory() ? null : `${baseUrl}/files/${itemPath}`,
+        url: item.isDirectory() ? null : `/files/${itemPath}`,
         size: stats.size,
         modified: stats.mtime
       }
