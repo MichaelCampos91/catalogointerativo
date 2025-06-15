@@ -85,20 +85,20 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: "Nome da pasta não especificado" }, { status: 400 })
         }
 
-        const newFolderPath = path.join(targetPath, folderName)
-        console.log("API: Caminho completo da nova pasta", { newFolderPath })
+        const folderPath = path.join(targetPath, folderName)
+        console.log("API: Caminho completo da nova pasta", { folderPath })
 
-        if (fs.existsSync(newFolderPath)) {
-          console.error("API: Pasta já existe", { newFolderPath })
+        if (fs.existsSync(folderPath)) {
+          console.error("API: Pasta já existe", { folderPath })
           return NextResponse.json({ error: "Pasta já existe" }, { status: 400 })
         }
 
         try {
-          fs.mkdirSync(newFolderPath, { recursive: true })
-          console.log("API: Pasta criada com sucesso", { newFolderPath })
+          fs.mkdirSync(folderPath, { recursive: true, mode: 0o775 })
+          console.log("API: Pasta criada com sucesso", { folderPath })
           return NextResponse.json({ message: "Pasta criada com sucesso" })
         } catch (mkdirError) {
-          console.error("API: Erro ao criar pasta", { error: mkdirError, newFolderPath })
+          console.error("API: Erro ao criar pasta", { error: mkdirError, folderPath })
           return NextResponse.json(
             { error: "Erro ao criar pasta", message: mkdirError instanceof Error ? mkdirError.message : "Erro desconhecido" },
             { status: 500 }
