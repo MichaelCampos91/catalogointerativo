@@ -87,10 +87,34 @@ export async function getOrdersByDate(date: string): Promise<Order[]> {
   }
 }
 
+// Função para verificar se já existe um pedido com o mesmo número
+export async function checkOrderExists(orderNumber: string): Promise<boolean> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      'SELECT COUNT(*) FROM orders WHERE "order" = $1',
+      [orderNumber]
+    )
+    return parseInt(result.rows[0].count) > 0
+  } catch (error) {
+    console.error("Erro ao verificar pedido duplicado:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
 // Função para criar um novo pedido
 export async function createOrder(order: CreateOrder): Promise<Order> {
   let client
   try {
+    // Verifica se já existe um pedido com o mesmo número
+    const orderExists = await checkOrderExists(order.order)
+    if (orderExists) {
+      throw new Error("Já existe um pedido com este número")
+    }
+
     client = await pool.connect()
     const result = await client.query(
       `INSERT INTO orders (customer_name, quantity_purchased, selected_images, whatsapp_message, "order") 

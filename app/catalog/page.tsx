@@ -44,7 +44,7 @@ export default function CatalogPage() {
   const [images, setImages] = useState<CatalogImage[]>([])
   const [selectedImages, setSelectedImages] = useState<string[]>([])
   const [customerData, setCustomerData] = useState<{ name: string; quantity: number; orderNumber: string } | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
@@ -62,24 +62,24 @@ export default function CatalogPage() {
 
   useEffect(() => {
     const data = localStorage.getItem("customerData")
-    if (!data) {
-      router.push("/")
-      return
+    if (data) {
+      setCustomerData(JSON.parse(data))
     }
-    setCustomerData(JSON.parse(data))
   
     loadCatalogData()
 
-    // Inicializar o cronômetro
-    const savedTime = localStorage.getItem("catalogTimer")
-    if (savedTime) {
-      const endTime = parseInt(savedTime)
-      const now = Math.floor(Date.now() / 1000)
-      const remaining = Math.max(0, endTime - now)
-      setTimeLeft(remaining)
-    } else {
-      const endTime = Math.floor(Date.now() / 1000) + (2 * 60 * 60)
-      localStorage.setItem("catalogTimer", endTime.toString())
+    // Inicializar o cronômetro apenas se houver dados do cliente
+    if (data) {
+      const savedTime = localStorage.getItem("catalogTimer")
+      if (savedTime) {
+        const endTime = parseInt(savedTime)
+        const now = Math.floor(Date.now() / 1000)
+        const remaining = Math.max(0, endTime - now)
+        setTimeLeft(remaining)
+      } else {
+        const endTime = Math.floor(Date.now() / 1000) + (2 * 60 * 60)
+        localStorage.setItem("catalogTimer", endTime.toString())
+      }
     }
   }, [router])
 
@@ -165,7 +165,7 @@ export default function CatalogPage() {
   }
 
   const handleImageSelect = (imageCode: string) => {
-    if (!customerData) return
+    if (!customerData) return // Não permite seleção no modo de visualização
 
     if (selectedImages.includes(imageCode)) {
       setSelectedImages((prev) => prev.filter((code) => code !== imageCode))
@@ -177,10 +177,12 @@ export default function CatalogPage() {
   const handleConfirmOrder = async () => {
     if (!customerData || !isAware) return
 
-    const message = `Olá! Meu nome é *${customerData.name}* e esses são os temas que escolhi do catálogo:\n\n${selectedImages.map((code) => `*${code}*`).join("\n")} \n Nº do pedido: *${customerData.orderNumber}*`
-
-    // Salvar pedido no banco
     try {
+      setLoading(true)
+      setError(null)
+
+      const message = `Olá! Meu nome é *${customerData.name}* e esses são os temas que escolhi do catálogo:\n\n${selectedImages.map((code) => `*${code}*`).join("\n")} \n Nº do pedido: *${customerData.orderNumber}*`
+
       const response = await fetch("/api/orders", {
         method: "POST",
         headers: {
@@ -197,17 +199,12 @@ export default function CatalogPage() {
 
       if (!response.ok) {
         const errorData = await response.json()
-        console.error("Erro ao salvar pedido:", errorData)
         throw new Error(errorData.message || "Erro ao salvar pedido")
       }
 
       // Limpar localStorage
       localStorage.removeItem("customerData")
       localStorage.removeItem("sessionLocked")
-
-      // Abrir WhatsApp após salvar com sucesso
-      //const whatsappUrl = `https://wa.me/?phone=5518997003934&text=${encodeURIComponent(message)}`
-      //window.open(whatsappUrl, "_blank")
 
       toast.success("Seu pedido foi confirmado! Conheça outros produtos em nossa loja...")
       
@@ -220,6 +217,9 @@ export default function CatalogPage() {
     } catch (error) {
       console.error("Erro ao salvar pedido:", error)
       setError(error instanceof Error ? error.message : "Erro ao salvar pedido")
+      toast.error(error instanceof Error ? error.message : "Erro ao salvar pedido")
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -271,11 +271,7 @@ export default function CatalogPage() {
     )
   }
 
-  if (!customerData) {
-    return null
-  }
-
-  const isSelectionComplete = selectedImages.length === customerData.quantity
+  const isSelectionComplete = customerData ? selectedImages.length === customerData.quantity : false
   const filteredCategories = getFilteredCategories()
 
   return (
@@ -285,15 +281,20 @@ export default function CatalogPage() {
         <div className="max-w-4xl mx-auto">
           {/* Nav */}
           <div className="flex items-center justify-between p-4">
-            <Button variant="ghost" size="sm" onClick={() => router.push("/catalog")}>
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Voltar
-            </Button>
+            
+            <img className="w-[120px]" src="https://cdn.dooca.store/142264/files/logo-cenario-2024-colorida-fundo-transparente.png?v=1700832681" alt="Logo"/>
+            
             <div className="text-center">
-              <p className="font-medium">Olá, {customerData.name}!</p>
-              <Badge variant={isSelectionComplete ? "default" : "secondary"}>
-                {selectedImages.length}/{customerData.quantity} selecionadas
-              </Badge>
+              {customerData ? (
+                <>
+                  <p className="font-medium">Olá, {customerData.name}!</p>
+                  <Badge variant={isSelectionComplete ? "default" : "secondary"}>
+                    {selectedImages.length}/{customerData.quantity} selecionadas
+                  </Badge>
+                </>
+              ) : (
+                <p className="font-medium">Modo de Visualização</p>
+              )}
             </div>
           </div>
 
@@ -311,12 +312,14 @@ export default function CatalogPage() {
             </div>
           </div>
 
-          {/* Cronômetro */}
-          <div className="px-4 pb-4 text-center">
-            <p className="text-sm text-gray-600">
-              Você tem <span className="font-bold text-indigo-600">{formatTimeLeft(timeLeft)} hrs</span> para finalizar a seleção.
-            </p>
-          </div>
+          {/* Cronômetro - apenas se houver dados do cliente */}
+          {customerData && (
+            <div className="px-4 pb-4 text-center">
+              <p className="text-sm text-gray-600">
+                Você tem <span className="font-bold text-indigo-600">{formatTimeLeft(timeLeft)} hrs</span> para finalizar a seleção.
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -345,15 +348,15 @@ export default function CatalogPage() {
                     <div className="inline-flex gap-3 min-w-full">
                       {categoryImages.map((image) => {
                         const isSelected = selectedImages.includes(image.code)
-                        const isDisabled = !isSelected && selectedImages.length >= customerData.quantity
+                        const isDisabled = !isSelected && selectedImages.length >= (customerData?.quantity ?? 0)
 
                         return (
                           <Card
                             key={image.id}
-                            className={`relative cursor-pointer transition-all flex-shrink-0 w-[200px] ${
+                            className={`relative transition-all flex-shrink-0 w-[200px] ${
                               isSelected ? "ring-2 ring-indigo-500" : ""
-                            } ${isDisabled ? "opacity-50" : "hover:shadow-md"}`}
-                            onClick={() => !isDisabled && handleImageSelect(image.code)}
+                            } ${!customerData ? "cursor-default" : isDisabled ? "opacity-50" : "cursor-pointer hover:shadow-md"}`}
+                            onClick={() => customerData && !isDisabled && handleImageSelect(image.code)}
                           >
                             <CardContent className="p-0">
                               <div className="relative aspect-square">
@@ -400,7 +403,6 @@ export default function CatalogPage() {
               <DialogTitle className="text-center">Confirmar Pedido</DialogTitle>
               <DialogDescription className="text-center">
                 Você está prestes a confirmar seu pedido com {selectedImages.length} imagens selecionadas.
-                Após a confirmação, você será redirecionado para o WhatsApp para finalizar o processo.
               </DialogDescription>
             </DialogHeader>
             <div className="flex items-center space-x-2 mt-4">
@@ -419,23 +421,30 @@ export default function CatalogPage() {
             <div className="flex justify-end mt-6">
               <Button
                 onClick={handleConfirmOrder}
-                disabled={!isAware}
+                disabled={!isAware || loading}
                 className="w-full"
               >
-                Confirmar Pedido
+                {loading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Processando...
+                  </>
+                ) : (
+                  "Confirmar Pedido"
+                )}
               </Button>
             </div>
           </DialogContent>
         </Dialog>
 
         {/* Botão de WhatsApp */}
-        {selectedImages.length > 0 && (
+        {customerData && selectedImages.length > 0 && (
           <div className="fixed bottom-4 left-0 right-0 flex justify-center">
             <Button
               size="lg"
               className="shadow-lg"
               onClick={() => setShowConfirmDialog(true)}
-              disabled={!isSelectionComplete}
+              disabled={!isSelectionComplete || loading}
             >
               <Check className="w-5 h-5 mr-2" />
               {isSelectionComplete ? "Confirmar Pedido" : "Selecione mais imagens"}

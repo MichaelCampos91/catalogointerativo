@@ -1,9 +1,20 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { toast } from "@/components/ui/use-toast"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -11,7 +22,7 @@ import {
   BreadcrumbList,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { ArrowLeft, Folder, FileIcon, RefreshCw, Home } from "lucide-react"
+import { ArrowLeft, Folder, FileIcon, RefreshCw, Home, Plus, Upload, Trash2 } from "lucide-react"
 
 type FileItem = {
   name: string
@@ -31,6 +42,13 @@ export default function FilesPage() {
   const [error, setError] = useState<string | null>(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [password, setPassword] = useState("")
+  const [showCreateFolder, setShowCreateFolder] = useState(false)
+  const [newFolderName, setNewFolderName] = useState("")
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [selectedFolder, setSelectedFolder] = useState<FileItem | null>(null)
+  const [deleteSuccess, setDeleteSuccess] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
   const searchParams = useSearchParams()
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/catalogointerativo"
@@ -108,6 +126,146 @@ export default function FilesPage() {
     return breadcrumbs
   }
 
+  const handleCreateFolder = async () => {
+    try {
+      setLoading(true)
+      const formData = new FormData()
+      formData.append("action", "createFolder")
+      // Garantir que sempre enviamos um diretório, mesmo que vazio
+      formData.append("dir", currentDir || "")
+      formData.append("folderName", newFolderName)
+
+      console.log("Frontend: Enviando requisição para criar pasta", {
+        action: "createFolder",
+        dir: currentDir || "",
+        folderName: newFolderName
+      })
+
+      const response = await fetch("/api/files", {
+        method: "POST",
+        body: formData,
+      })
+
+      const data = await response.json()
+      console.log("Frontend: Resposta do servidor", { status: response.status, data })
+
+      if (!response.ok) {
+        throw new Error(data.message || data.error || "Erro ao criar pasta")
+      }
+
+      toast({
+        title: "Sucesso",
+        description: "Pasta criada com sucesso",
+      })
+      setShowCreateFolder(false)
+      setNewFolderName("")
+      loadFiles()
+    } catch (error) {
+      console.error("Frontend: Erro ao criar pasta", error)
+      toast({
+        title: "Erro",
+        description: error instanceof Error ? error.message : "Erro ao criar pasta",
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleDeleteItem = async (item: FileItem) => {
+    try {
+      setIsDeleting(true)
+      setDeleteSuccess(false)
+      const params = new URLSearchParams({
+        dir: currentDir || "",
+        path: item.name
+      })
+
+      console.log("Frontend: Enviando requisição para excluir item", {
+        dir: currentDir || "",
+        path: item.name,
+        isDirectory: item.isDirectory
+      })
+
+      const response = await fetch(`/api/files?${params.toString()}`, {
+        method: "DELETE"
+      })
+
+      const data = await response.json()
+      console.log("Frontend: Resposta do servidor", { status: response.status, data })
+
+      if (!response.ok) {
+        throw new Error(data.message || data.error || `Erro ao excluir ${item.isDirectory ? 'pasta' : 'arquivo'}`)
+      }
+
+      setDeleteSuccess(true)
+      toast({
+        title: "Sucesso",
+        description: `${item.isDirectory ? 'Diretório' : 'Arquivo'} excluído com sucesso!`,
+      })
+      loadFiles()
+    } catch (error) {
+      console.error("Frontend: Erro ao excluir item", error)
+      toast({
+        title: "Erro",
+        description: error instanceof Error ? error.message : `Erro ao excluir ${item.isDirectory ? 'pasta' : 'arquivo'}`,
+        variant: "destructive",
+      })
+      setShowDeleteConfirm(false)
+      setSelectedFolder(null)
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  const handleCloseDeleteModal = () => {
+    setShowDeleteConfirm(false)
+    setSelectedFolder(null)
+    setDeleteSuccess(false)
+    setIsDeleting(false)
+  }
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files
+    if (!files || files.length === 0) return
+
+    try {
+      setLoading(true)
+      const formData = new FormData()
+      formData.append("action", "upload")
+      formData.append("dir", currentDir)
+      formData.append("file", files[0])
+
+      const response = await fetch("/api/files", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.message || "Erro ao fazer upload do arquivo")
+      }
+
+      toast({
+        title: "Sucesso",
+        description: "Arquivo enviado com sucesso",
+      })
+      loadFiles()
+    } catch (error) {
+      console.error("Erro ao fazer upload:", error)
+      toast({
+        title: "Erro",
+        description: error instanceof Error ? error.message : "Erro ao fazer upload do arquivo",
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""
+      }
+    }
+  }
+
   // Renderizar login se não estiver autenticado
   if (!isAuthenticated) {
     return (
@@ -129,13 +287,13 @@ export default function FilesPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleLogin()}
                 className="w-full px-3 py-2 border rounded-md"
-                placeholder={`Senha padrão: ${ADMIN_PASSWORD}`}
+                placeholder={`Digite a senha`}
               />
             </div>
             <Button onClick={handleLogin} className="w-full bg-primary text-primary-foreground">
               Entrar
             </Button>
-            <Button variant="outline" onClick={() => router.push("/admin")} className="w-full bg-primary text-primary-foreground">
+            <Button variant="ghost" onClick={() => router.push("/admin")} className="w-full text-primary">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Voltar ao Painel
             </Button>
@@ -154,6 +312,14 @@ export default function FilesPage() {
             <p className="text-gray-600">Navegue pelos arquivos e pastas do catálogo</p>
           </div>
           <div className="flex gap-2">
+            <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
+              <Upload className="w-4 h-4 mr-2" />
+              Upload
+            </Button>
+            <Button variant="outline" onClick={() => setShowCreateFolder(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              Nova Pasta
+            </Button>
             <Button variant="outline" onClick={loadFiles}>
               <RefreshCw className="w-4 h-4 mr-2" />
               Atualizar
@@ -164,6 +330,13 @@ export default function FilesPage() {
             </Button>
           </div>
         </div>
+
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileUpload}
+          className="hidden"
+        />
 
         {/* Breadcrumbs */}
         <Card className="mb-6">
@@ -255,12 +428,28 @@ export default function FilesPage() {
                         border rounded-lg overflow-hidden hover:shadow-md transition-shadow
                         ${item.isDirectory ? "bg-blue-50" : "bg-white"}
                       `}
-                      onClick={() => item.isDirectory && navigateTo(item.path)}
                     >
                       {item.isDirectory ? (
-                        <div className="p-4 text-center cursor-pointer">
-                          <Folder className="w-16 h-16 mx-auto text-blue-500 mb-2" />
-                          <p className="text-sm font-medium truncate">{item.name}</p>
+                        <div className="p-4 text-center">
+                          <div
+                            className="cursor-pointer"
+                            onClick={() => navigateTo(item.path)}
+                          >
+                            <Folder className="w-16 h-16 mx-auto text-blue-500 mb-2" />
+                            <p className="text-sm font-medium truncate">{item.name}</p>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="mt-2 text-red-500 hover:text-red-700 hover:bg-red-50"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setSelectedFolder(item)
+                              setShowDeleteConfirm(true)
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
                         </div>
                       ) : item.url && item.url.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
                         <div className="flex flex-col h-full">
@@ -269,12 +458,34 @@ export default function FilesPage() {
                           </div>
                           <div className="p-2 text-center">
                             <p className="text-sm font-medium truncate">{item.name}</p>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="mt-1 text-red-500 hover:text-red-700 hover:bg-red-50"
+                              onClick={() => {
+                                setSelectedFolder(item)
+                                setShowDeleteConfirm(true)
+                              }}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
                           </div>
                         </div>
                       ) : (
                         <div className="p-4 text-center">
                           <FileIcon className="w-16 h-16 mx-auto text-gray-400 mb-2" />
                           <p className="text-sm font-medium truncate">{item.name}</p>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="mt-2 text-red-500 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => {
+                              setSelectedFolder(item)
+                              setShowDeleteConfirm(true)
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
                         </div>
                       )}
                     </div>
@@ -284,6 +495,106 @@ export default function FilesPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* Create Folder Dialog */}
+        <Dialog open={showCreateFolder} onOpenChange={setShowCreateFolder}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Criar Nova Pasta</DialogTitle>
+              <DialogDescription>
+                Digite o nome da nova pasta que deseja criar
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-4">
+              <Label htmlFor="folderName">Nome da Pasta</Label>
+              <Input
+                id="folderName"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                placeholder="Digite o nome da pasta"
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowCreateFolder(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleCreateFolder} disabled={!newFolderName.trim()}>
+                Criar Pasta
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+        <Dialog open={showDeleteConfirm} onOpenChange={handleCloseDeleteModal}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                {deleteSuccess 
+                  ? "Exclusão Concluída" 
+                  : `Excluir ${selectedFolder?.isDirectory ? 'Pasta' : 'Arquivo'}`
+                }
+              </DialogTitle>
+              <DialogDescription>
+                {deleteSuccess ? (
+                  <div className="text-center py-4">
+                    <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <svg
+                        className="w-6 h-6 text-green-600"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                    </div>
+                    <p className="text-green-600 font-medium">
+                      {selectedFolder?.isDirectory ? 'Pasta' : 'Arquivo'} excluído com sucesso!
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    Tem certeza que deseja excluir {selectedFolder?.isDirectory ? 'a pasta' : 'o arquivo'} "{selectedFolder?.name}"?
+                    {selectedFolder?.isDirectory && " Todos os arquivos dentro dela serão excluídos."}
+                    Esta ação não pode ser desfeita.
+                  </>
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              {deleteSuccess ? (
+                <Button onClick={handleCloseDeleteModal}>
+                  Fechar
+                </Button>
+              ) : (
+                <>
+                  <Button variant="outline" onClick={handleCloseDeleteModal}>
+                    Cancelar
+                  </Button>
+                  <Button 
+                    variant="destructive" 
+                    onClick={() => selectedFolder && handleDeleteItem(selectedFolder)}
+                    disabled={isDeleting}
+                  >
+                    {isDeleting ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                        Excluindo...
+                      </>
+                    ) : (
+                      "Excluir"
+                    )}
+                  </Button>
+                </>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   )
