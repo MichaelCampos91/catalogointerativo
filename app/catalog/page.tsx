@@ -282,7 +282,7 @@ export default function CatalogPage() {
           {/* Nav */}
           <div className="flex items-center justify-between p-4">
             
-            <img className="w-[120px]" src="https://cdn.dooca.store/142264/files/logo-cenario-2024-colorida-fundo-transparente.png?v=1700832681" alt="Logo"/>
+            <img className="w-[120px]" src="/logo.png" alt="Logo"/>
             
             <div className="text-center">
               {customerData ? (
@@ -368,6 +368,13 @@ export default function CatalogPage() {
                                   draggable="false"
                                   style={{ userSelect: 'none' }}
                                 />
+                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                  <img 
+                                    src="/logo.png" 
+                                    alt="Logo" 
+                                    className="w-24 opacity-40"
+                                  />
+                                </div>
                                 {isSelected && (
                                   <div className="absolute inset-0 bg-indigo-500 bg-opacity-20 flex items-center justify-center">
                                     <Check className="w-8 h-8 text-indigo-500" />

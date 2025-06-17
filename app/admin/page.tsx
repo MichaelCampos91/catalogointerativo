@@ -49,7 +49,7 @@ export default function AdminPage() {
   const toast = useToast()
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/catalogointerativo"
   const [downloadingOrder, setDownloadingOrder] = useState<string | null>(null)
-  const [filterPending, setFilterPending] = useState<"all" | "pending">("all")
+  const [filterPending, setFilterPending] = useState<"all" | "pending" | "completed">("all")
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false)
   const [selectedOrderToClose, setSelectedOrderToClose] = useState<Order | null>(null)
 
@@ -120,6 +120,8 @@ export default function AdminPage() {
   
     if (filterPending === "pending") {
       filtered = filtered.filter((order) => order.is_pending)
+    } else if (filterPending === "completed") {
+      filtered = filtered.filter((order) => !order.is_pending)
     }
   
     setFilteredOrders(filtered)
@@ -312,7 +314,9 @@ export default function AdminPage() {
             <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" className="ml-2">
-                {filterPending === "pending" ? "Somente Pendentes" : "Todos os Pedidos"}
+                {filterPending === "pending" ? "Somente Pendentes" : 
+                 filterPending === "completed" ? "Somente Concluídos" : 
+                 "Todos os Pedidos"}
                 <ChevronDown className="ml-2 h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
@@ -322,6 +326,9 @@ export default function AdminPage() {
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setFilterPending("pending")}>
                 Somente Pendentes
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setFilterPending("completed")}>
+                Somente Concluídos
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -460,7 +467,7 @@ export default function AdminPage() {
                                   <ChevronDown className="h-4 w-4" />
                                 </Button>
                               </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-[200px]">
+                              <DropdownMenuContent align="end" className="w-[180px] max-h-[300px] overflow-y-auto">
                                 <div className="p-2 flex items-center justify-between border-b">
                                   <Button
                                     variant="ghost"

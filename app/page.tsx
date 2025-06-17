@@ -93,7 +93,7 @@ export default function HomePage() {
         <div className="max-w-md mx-auto pt-8">
           <div className="text-center mb-8">
             <div className="w-[150px] flex items-center justify-center mx-auto mb-4">
-              <img className="w-[150px]" src="https://cdn.dooca.store/142264/files/logo-cenario-2024-colorida-fundo-transparente.png?v=1700832681" alt="Logo"/>
+              <img className="w-[150px]" src="/logo.png" alt="Logo"/>
             </div>
           </div>
 

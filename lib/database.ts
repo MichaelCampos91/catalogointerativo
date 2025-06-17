@@ -50,7 +50,7 @@ export async function getOrders(): Promise<Order[]> {
   let client
   try {
     client = await pool.connect()
-    const result = await client.query("SELECT * FROM orders ORDER BY created_at DESC")
+    const result = await client.query("SELECT * FROM orders ORDER BY created_at ASC")
     return result.rows.map((row) => ({
       ...row,
       selected_images: row.selected_images,
@@ -72,7 +72,7 @@ export async function getOrdersByDate(date: string): Promise<Order[]> {
     const result = await client.query(
       `SELECT * FROM orders 
        WHERE DATE(created_at) = $1 
-       ORDER BY created_at DESC`,
+       ORDER BY created_at ASC`,
       [date],
     )
     return result.rows.map((row) => ({
