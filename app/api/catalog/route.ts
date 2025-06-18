@@ -2,23 +2,32 @@ import { NextResponse } from "next/server"
 import fs from "fs"
 import path from "path"
 
+interface ImageItem {
+  path: string
+  name: string
+  category: string
+}
+
 // Função para ler diretório recursivamente
-async function readDirectoryRecursively(dirPath: string, basePath: string) {
+async function readDirectoryRecursively(dirPath: string, basePath: string): Promise<ImageItem[]> {
   const items = await fs.promises.readdir(dirPath, { withFileTypes: true })
-  const results = []
+  const results: ImageItem[] = []
 
   for (const item of items) {
     const fullPath = path.join(dirPath, item.name)
-    const relativePath = path.relative(basePath, dirPath)
     
     if (item.isDirectory()) {
       const subResults = await readDirectoryRecursively(fullPath, basePath)
       results.push(...subResults)
     } else if (/\.(jpg|jpeg|png|gif|webp)$/i.test(item.name)) {
+      // Calcular o caminho relativo corretamente
+      const relativePath = path.relative(basePath, fullPath)
+      const category = path.dirname(relativePath)
+      
       results.push({
-        path: path.join(relativePath, item.name),
+        path: relativePath,
         name: item.name,
-        category: relativePath || 'root'
+        category: category === '.' ? 'root' : category
       })
     }
   }
@@ -34,6 +43,7 @@ export async function GET(request: Request) {
     const category = searchParams.get('category')
 
     const basePath = path.join(process.cwd(), "public", "files")
+    const baseUrlPath = process.env.NEXT_PUBLIC_BASE_PATH || ""
     
     // Verificar se o diretório existe
     if (!fs.existsSync(basePath)) {
@@ -45,7 +55,7 @@ export async function GET(request: Request) {
     
     // Agrupar por categoria
     const categoriesMap = new Map()
-    allImages.forEach(img => {
+    allImages.forEach((img: ImageItem) => {
       if (!categoriesMap.has(img.category)) {
         categoriesMap.set(img.category, {
           id: `cat_${categoriesMap.size + 1}`,
@@ -60,7 +70,7 @@ export async function GET(request: Request) {
     // Filtrar por categoria se especificado
     let filteredImages = allImages
     if (category) {
-      filteredImages = allImages.filter(img => img.category === category)
+      filteredImages = allImages.filter((img: ImageItem) => img.category === category)
     }
 
     // Aplicar paginação
@@ -69,12 +79,12 @@ export async function GET(request: Request) {
     const paginatedImages = filteredImages.slice(startIndex, endIndex)
 
     // Transformar imagens no formato esperado
-    const images = paginatedImages.map((img, index) => ({
+    const images = paginatedImages.map((img: ImageItem, index: number) => ({
       id: `img_${index + 1}`,
       code: path.parse(img.name).name,
       category_id: categoriesMap.get(img.category).id,
-      image_url: `/files/${img.path}`,
-      thumbnail_url: `/files/${img.path}`
+      image_url: `${baseUrlPath}/files/${img.path}`,
+      thumbnail_url: `${baseUrlPath}/files/${img.path}`
     }))
 
     return NextResponse.json({

@@ -60,9 +60,12 @@ export async function POST(request: Request) {
     // Limpar pasta temporária
     fs.rmSync(orderDir, { recursive: true, force: true })
 
+    // Incluir o caminho base correto
+    const basePath = process.env.NEXT_PUBLIC_BASE_PATH || ""
+
     return NextResponse.json({
       success: true,
-      zipPath: `/temp/${folderName}.zip`,
+      zipPath: `${basePath}/temp/${folderName}.zip`,
       foundFiles: foundFiles.length
     })
   } catch (error) {

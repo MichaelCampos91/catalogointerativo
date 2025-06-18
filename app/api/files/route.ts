@@ -36,22 +36,23 @@ export async function GET(request: Request) {
 
     const items = fs.readdirSync(targetPath, { withFileTypes: true })
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || ""
+    const basePath = process.env.NEXT_PUBLIC_BASE_PATH || ""
 
     const files = items.map((item) => {
       const itemPath = path.join(dir, item.name)
       const fullPath = path.join(targetPath, item.name)
       const stats = fs.statSync(fullPath)
       
-      // Construir URL corretamente
+      // Construir URL corretamente com o caminho base
       let url = null
       if (!item.isDirectory()) {
         if (dir) {
           // Se estamos em uma subpasta, incluir o diretório na URL
-          url = `/files/${dir}/${item.name}`
-          console.log("API: URL construída", { itemName: item.name, dir, url })
+          url = `${basePath}/files/${dir}/${item.name}`
+          console.log("API: URL construída", { itemName: item.name, dir, url, basePath })
         } else {
           // Se estamos na pasta raiz
-          url = `/files/${item.name}`
+          url = `${basePath}/files/${item.name}`
         }
       }
       
