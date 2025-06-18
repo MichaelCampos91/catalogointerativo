@@ -81,6 +81,8 @@ export default function FilesPage() {
 
       // Remover "files" do início do caminho se existir
       const cleanDir = currentDir.startsWith("files/") ? currentDir.slice(6) : currentDir
+      console.log("Frontend: Carregando arquivos", { currentDir, cleanDir })
+      
       const response = await fetch(`/api/files?dir=${encodeURIComponent(cleanDir)}`)
 
       if (!response.ok) {
@@ -89,6 +91,10 @@ export default function FilesPage() {
       }
 
       const data = await response.json()
+      console.log("Frontend: Arquivos carregados", { 
+        itemCount: data.items?.length,
+        items: data.items?.map((item: FileItem) => ({ name: item.name, url: item.url, isDirectory: item.isDirectory }))
+      })
       setFiles(data)
     } catch (error) {
       console.error("Erro ao carregar arquivos:", error)
@@ -239,6 +245,13 @@ export default function FilesPage() {
       formData.append("dir", cleanDir)
       formData.append("file", files[0])
 
+      console.log("Frontend: Enviando upload", { 
+        fileName: files[0].name, 
+        currentDir, 
+        cleanDir,
+        fileSize: files[0].size 
+      })
+
       const response = await fetch("/api/files", {
         method: "POST",
         body: formData,
@@ -248,6 +261,8 @@ export default function FilesPage() {
         const error = await response.json()
         throw new Error(error.message || "Erro ao fazer upload do arquivo")
       }
+
+      console.log("Frontend: Upload realizado com sucesso")
 
       toast({
         title: "Sucesso",
@@ -347,6 +362,7 @@ export default function FilesPage() {
           type="file"
           ref={fileInputRef}
           onChange={handleFileUpload}
+          accept="image/*"
           className="hidden"
         />
 
@@ -489,7 +505,18 @@ export default function FilesPage() {
                       ) : item.url && item.url.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
                         <div className="flex flex-col h-full">
                           <div className="relative aspect-square">
-                            <img src={item.url || "/placeholder.svg"} alt={item.name} className="object-cover" />
+                            <img 
+                              src={item.url} 
+                              alt={item.name} 
+                              className="object-cover w-full h-full"
+                              onError={(e) => {
+                                console.error("Erro ao carregar imagem:", item.url)
+                                e.currentTarget.src = "/placeholder.svg"
+                              }}
+                              onLoad={() => {
+                                console.log("Imagem carregada com sucesso:", item.url)
+                              }}
+                            />
                           </div>
                           <div className="p-2 text-center">
                             <p className="text-sm font-medium truncate">{item.name}</p>

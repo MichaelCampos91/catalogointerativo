@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Download, Calendar, User, Package, ArrowLeft, AlertCircle, FolderOpen, Copy, Check, ChevronDown, Image } from "lucide-react"
+import { Download, Calendar, User, Package, ArrowLeft, AlertCircle, FolderOpen, Copy, Check, ChevronDown, Image, Search } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-sonner-toast"
 import {
@@ -43,6 +43,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [dateFilter, setDateFilter] = useState("")
+  const [searchQuery, setSearchQuery] = useState("")
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [password, setPassword] = useState("")
   const router = useRouter()
@@ -64,7 +65,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     filterOrders()
-  }, [orders, dateFilter, filterPending])
+  }, [orders, dateFilter, filterPending, searchQuery])
 
   const handleLogin = () => {
     if (password === ADMIN_PASSWORD) {
@@ -99,7 +100,7 @@ export default function AdminPage() {
   }
 
   const filterOrders = async () => {
-    if (!dateFilter && filterPending === "all") {
+    if (!dateFilter && filterPending === "all" && !searchQuery) {
       setFilteredOrders(orders)
       return
     }
@@ -122,6 +123,15 @@ export default function AdminPage() {
       filtered = filtered.filter((order) => order.is_pending)
     } else if (filterPending === "completed") {
       filtered = filtered.filter((order) => !order.is_pending)
+    }
+
+    // Busca por nome do cliente ou número do pedido
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase()
+      filtered = filtered.filter((order) => 
+        order.customer_name.toLowerCase().includes(query) ||
+        order.order.toLowerCase().includes(query)
+      )
     }
   
     setFilteredOrders(filtered)
@@ -384,28 +394,44 @@ export default function AdminPage() {
               </div>
             </CardContent>
           </Card>
-          {/* Total de Itens 
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-500">Total de Itens</p>
-                  <p className="text-2xl font-bold">
-                    {filteredOrders.reduce((total, order) => total + order.selected_images.length, 0)}
-                  </p>
-                </div>
-                <Image className="w-8 h-8 text-indigo-600" />
-              </div>
-            </CardContent>
-          </Card>
-          */}
         </div>
+
+        {/* Campo de busca */}
+        <Card className="mb-6">
+          <CardContent className="p-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <Input
+                type="text"
+                placeholder="Buscar por nome do cliente ou número do pedido..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10 pr-4 py-2"
+              />
+              {searchQuery && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  ✕
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Tabela de pedidos */}
         <Card>
           <CardHeader>
             <CardTitle className="text-lg font-bold">Lista de Pedidos</CardTitle>
-            <CardDescription className="text-sm">{filteredOrders.length} pedido(s) encontrado(s)</CardDescription>
+            <CardDescription className="text-sm">
+              {searchQuery 
+                ? `${filteredOrders.length} pedido(s) encontrado(s) para "${searchQuery}"`
+                : `${filteredOrders.length} pedido(s) encontrado(s)`
+              }
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto overflow-y-auto max-h-[320px]">

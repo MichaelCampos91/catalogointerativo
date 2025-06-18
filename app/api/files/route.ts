@@ -42,11 +42,24 @@ export async function GET(request: Request) {
       const fullPath = path.join(targetPath, item.name)
       const stats = fs.statSync(fullPath)
       
+      // Construir URL corretamente
+      let url = null
+      if (!item.isDirectory()) {
+        if (dir) {
+          // Se estamos em uma subpasta, incluir o diretório na URL
+          url = `/files/${dir}/${item.name}`
+          console.log("API: URL construída", { itemName: item.name, dir, url })
+        } else {
+          // Se estamos na pasta raiz
+          url = `/files/${item.name}`
+        }
+      }
+      
       return {
         name: item.name,
         path: itemPath,
         isDirectory: item.isDirectory(),
-        url: item.isDirectory() ? null : `/files/${itemPath}`,
+        url: url,
         size: stats.size,
         modified: stats.mtime
       }
