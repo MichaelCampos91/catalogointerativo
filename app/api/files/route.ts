@@ -46,14 +46,15 @@ export async function GET(request: Request) {
       // Construir URL corretamente com o caminho base
       let url = null
       if (!item.isDirectory()) {
-        if (dir) {
-          // Se estamos em uma subpasta, incluir o diretório na URL
-          url = `/files/${dir}/${item.name}`
-          console.log("API: URL construída", { itemName: item.name, dir, url, basePath })
-        } else {
-          // Se estamos na pasta raiz
-          url = `/files/${item.name}`
-        }
+        const encodedDir = encodeURIComponent(dir)
+        const encodedName = encodeURIComponent(item.name)
+
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || ""
+        url = dir
+          ? `${baseUrl}/files/${encodedDir}/${encodedName}`
+          : `${baseUrl}/files/${encodedName}`
+
+        console.log("API: URL construída", { itemName: item.name, dir, url })
       }
       
       return {
@@ -127,16 +128,18 @@ export async function POST(request: Request) {
         if (!file) {
           return NextResponse.json({ error: "Arquivo não especificado" }, { status: 400 })
         }
-
+      
         const bytes = await file.arrayBuffer()
         const buffer = Buffer.from(bytes)
         const filePath = path.join(targetPath, file.name)
-
+      
         fs.writeFileSync(filePath, buffer)
-
-        // Definir permissões do arquivo como 664 (rw-rw-r--)
+      
+        //Permissão 664 garantida aqui
         fs.chmodSync(filePath, 0o664)
-
+        const stat = fs.statSync(filePath)
+        console.log("Permissões do arquivo:", stat.mode.toString(8))
+      
         console.log("Backend: Arquivo salvo com sucesso", { filePath })
         return NextResponse.json({ message: "Arquivo enviado com sucesso" })
       }
