@@ -48,11 +48,11 @@ export async function GET(request: Request) {
       if (!item.isDirectory()) {
         if (dir) {
           // Se estamos em uma subpasta, incluir o diretório na URL
-          url = `${basePath}/files/${dir}/${item.name}`
+          url = `/files/${dir}/${item.name}`
           console.log("API: URL construída", { itemName: item.name, dir, url, basePath })
         } else {
           // Se estamos na pasta raiz
-          url = `${basePath}/files/${item.name}`
+          url = `/files/${item.name}`
         }
       }
       
