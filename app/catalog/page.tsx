@@ -58,7 +58,6 @@ export default function CatalogPage() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [timeLeft, setTimeLeft] = useState<number>(24 * 60 * 60) // 24 horas em segundos
   const router = useRouter()
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/catalogointerativo"
 
   useEffect(() => {
     const data = localStorage.getItem("customerData")

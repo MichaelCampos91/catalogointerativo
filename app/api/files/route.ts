@@ -46,15 +46,14 @@ export async function GET(request: Request) {
       // Construir URL corretamente com o caminho base
       let url = null
       if (!item.isDirectory()) {
-        const encodedDir = encodeURIComponent(dir)
-        const encodedName = encodeURIComponent(item.name)
-
-        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || ""
-        url = dir
-          ? `${baseUrl}/files/${encodedDir}/${encodedName}`
-          : `${baseUrl}/files/${encodedName}`
-
-        console.log("API: URL construída", { itemName: item.name, dir, url })
+        if (dir) {
+          // Se estamos em uma subpasta, incluir o diretório na URL
+          url = `/files/${dir}/${item.name}`
+          console.log("API: URL construída", { itemName: item.name, dir, url, basePath })
+        } else {
+          // Se estamos na pasta raiz
+          url = `/files/${item.name}`
+        }
       }
       
       return {
