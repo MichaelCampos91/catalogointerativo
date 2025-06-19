@@ -222,7 +222,7 @@ export default function AdminPage() {
 
   const copyToClipboard = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(text)
+      await navigator.clipboard.writeText(text.toUpperCase())
       console.log("Copiado - toast acionado")
       toast.success({
         title: "Copiado!",
@@ -456,7 +456,15 @@ export default function AdminPage() {
                       <TableRow key={order.id}>
                         <TableCell>
                           <div className="space-y-1">
-                            <p className="font-medium">{order.customer_name}</p>
+                            <div className="flex items-center gap-1">
+                              <p className="font-medium">{order.customer_name.toUpperCase()}</p>
+                              <button
+                                onClick={() => copyToClipboard(order.customer_name)}
+                                className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                              >
+                                <Copy className="w-3 h-3" />
+                              </button>
+                            </div>
                             <button
                               onClick={() => copyToClipboard(order.order)}
                               className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors"
