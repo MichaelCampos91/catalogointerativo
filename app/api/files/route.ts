@@ -23,6 +23,7 @@ function validatePath(dir: string) {
   return targetPath
 }
 
+/* old GET
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -78,6 +79,50 @@ export async function GET(request: Request) {
     )
   }
 }
+*/
+
+export async function GET(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const dir = searchParams.get("dir") || ""
+
+    const targetPath = validatePath(dir)
+    
+    if (!fs.existsSync(targetPath)) {
+      return NextResponse.json({ error: "Diretório não encontrado" }, { status: 404 })
+    }
+
+    const items = fs.readdirSync(targetPath, { withFileTypes: true })
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || ""
+
+    const files = items.map((item) => {
+      const itemPath = path.join(dir, item.name)
+      const fullPath = path.join(targetPath, item.name)
+      const stats = fs.statSync(fullPath)
+      
+      return {
+        name: item.name,
+        path: itemPath,
+        isDirectory: item.isDirectory(),
+        url: item.isDirectory() ? null : `/files/${itemPath}`,
+        size: stats.size,
+        modified: stats.mtime
+      }
+    })
+
+    return NextResponse.json({
+      currentPath: dir,
+      items: files
+    })
+  } catch (error) {
+    console.error("Erro ao listar arquivos:", error)
+    return NextResponse.json(
+      { error: "Erro ao listar arquivos", message: error instanceof Error ? error.message : "Erro desconhecido" },
+      { status: 500 }
+    )
+  }
+}
+
 
 export async function POST(request: Request) {
   try {
