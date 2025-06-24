@@ -65,6 +65,12 @@ export default function CatalogPage() {
       setCustomerData(JSON.parse(data))
     }
   
+    // Carregar itens selecionados do localStorage
+    const savedSelectedImages = localStorage.getItem("selectedImages")
+    if (savedSelectedImages) {
+      setSelectedImages(JSON.parse(savedSelectedImages))
+    }
+
     loadCatalogData()
 
     // Inicializar o cronômetro apenas se houver dados do cliente
@@ -80,7 +86,7 @@ export default function CatalogPage() {
         localStorage.setItem("catalogTimer", endTime.toString())
       }
     }
-  }, [router])
+  }, [])
 
   // Efeito para atualizar o cronômetro
   useEffect(() => {
@@ -96,6 +102,15 @@ export default function CatalogPage() {
 
     return () => clearInterval(timer)
   }, [])
+
+  // Efeito para salvar itens selecionados no localStorage
+  useEffect(() => {
+    if (selectedImages.length > 0) {
+      localStorage.setItem("selectedImages", JSON.stringify(selectedImages))
+    } else {
+      localStorage.removeItem("selectedImages")
+    }
+  }, [selectedImages])
 
   // Função para formatar o tempo restante
   const formatTimeLeft = (seconds: number) => {
@@ -204,6 +219,7 @@ export default function CatalogPage() {
       // Limpar localStorage
       localStorage.removeItem("customerData")
       localStorage.removeItem("sessionLocked")
+      localStorage.removeItem("selectedImages")
 
       toast.success("Seu pedido foi confirmado! Conheça outros produtos em nossa loja...")
       
