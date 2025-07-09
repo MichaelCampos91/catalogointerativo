@@ -77,9 +77,9 @@ export default function ConfirmedPage() {
 
   const getImageUrl = (imageCode: string) => {
     const basePath = process.env.NEXT_PUBLIC_BASE_PATH || ""
-    // Por enquanto, assumindo que as imagens estão na raiz
-    // Se precisar buscar em subpastas, seria necessário uma API específica
-    return `${basePath}/files/${imageCode}.jpg`
+    // Limpar o código removendo pontos extras no final
+    const cleanCode = imageCode.replace(/\.+$/, '')
+    return `${basePath}/files/${cleanCode}.jpg`
   }
 
   const loadImageUrls = async (imageCodes: string[]) => {
