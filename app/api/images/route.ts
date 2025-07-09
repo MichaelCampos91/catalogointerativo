@@ -21,11 +21,19 @@ async function findImageByCode(imageCode: string): Promise<string | null> {
         const result = await searchRecursively(fullPath)
         if (result) return result
       } else if (item.isFile()) {
-        // Buscar pelo nome completo do arquivo (sem extensão)
+        const fileName = item.name
         const fileNameWithoutExt = path.parse(item.name).name
         
-        // Comparar o código com o nome do arquivo (sem extensão)
-        if (fileNameWithoutExt === imageCode && /\.(jpg|jpeg|png|gif|webp)$/i.test(item.name)) {
+        // Tentar diferentes formas de comparação
+        const comparisons = [
+          fileNameWithoutExt === imageCode, // Comparação exata sem extensão
+          fileNameWithoutExt.replace(/\.+$/, '') === imageCode.replace(/\.+$/, ''), // Removendo pontos no final
+          fileNameWithoutExt.replace(/\s+/g, '') === imageCode.replace(/\s+/g, ''), // Removendo espaços
+          fileNameWithoutExt.replace(/[^\w-]/g, '') === imageCode.replace(/[^\w-]/g, ''), // Apenas letras, números e hífens
+        ]
+        
+        if (comparisons.some(comp => comp) && /\.(jpg|jpeg|png|gif|webp)$/i.test(item.name)) {
+          console.log(`Match encontrado: arquivo="${fileNameWithoutExt}" código="${imageCode}"`)
           const relativePath = path.relative(basePath, fullPath)
           return relativePath
         }
@@ -47,15 +55,18 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Código da imagem é obrigatório" }, { status: 400 })
     }
 
+    console.log(`Buscando imagem com código: "${code}"`)
     const imagePath = await findImageByCode(code)
     
     if (!imagePath) {
+      console.log(`Imagem não encontrada para código: "${code}"`)
       return NextResponse.json({ error: "Imagem não encontrada" }, { status: 404 })
     }
 
     const baseUrlPath = process.env.NEXT_PUBLIC_BASE_PATH || ""
     const imageUrl = `${baseUrlPath}/files/${imagePath}`
-
+    
+    console.log(`Imagem encontrada: ${imagePath}`)
     return NextResponse.json({ url: imageUrl, path: imagePath })
   } catch (error) {
     console.error("Erro ao buscar imagem:", error)
