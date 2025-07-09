@@ -24,6 +24,11 @@ async function findImageByCode(imageCode: string): Promise<string | null> {
         const fileName = item.name
         const fileNameWithoutExt = path.parse(item.name).name
         
+        // Log apenas alguns arquivos para debug (evitar spam)
+        if (Math.random() < 0.01) { // 1% dos arquivos
+          console.log(`Verificando arquivo: "${fileNameWithoutExt}" vs código: "${imageCode}"`)
+        }
+        
         // Limpar o código de busca removendo extensão se existir
         const cleanImageCode = imageCode.replace(/\.(jpg|jpeg|png|gif|webp)$/i, '')
         
@@ -35,10 +40,13 @@ async function findImageByCode(imageCode: string): Promise<string | null> {
           fileNameWithoutExt.replace(/\s+/g, '') === cleanImageCode.replace(/\s+/g, ''), // Removendo espaços
           fileNameWithoutExt.replace(/[^\w-]/g, '') === cleanImageCode.replace(/[^\w-]/g, ''), // Apenas letras, números e hífens
           fileName === imageCode, // Comparação exata com extensão
+          // Busca mais flexível - verificar se o código está contido no nome do arquivo
+          fileNameWithoutExt.toLowerCase().includes(cleanImageCode.toLowerCase()),
+          cleanImageCode.toLowerCase().includes(fileNameWithoutExt.toLowerCase()),
         ]
         
         if (comparisons.some(comp => comp) && /\.(jpg|jpeg|png|gif|webp)$/i.test(item.name)) {
-          console.log(`Match encontrado: arquivo="${fileNameWithoutExt}" código="${imageCode}"`)
+          console.log(`✅ Match encontrado: arquivo="${fileNameWithoutExt}" código="${imageCode}" comparações=${comparisons.map(c => c ? '✓' : '✗').join('')}`)
           const relativePath = path.relative(basePath, fullPath)
           return relativePath
         }
@@ -64,14 +72,14 @@ export async function GET(request: Request) {
     const imagePath = await findImageByCode(code)
     
     if (!imagePath) {
-      console.log(`Imagem não encontrada para código: "${code}"`)
+      console.log(`❌ Imagem não encontrada para código: "${code}"`)
       return NextResponse.json({ error: "Imagem não encontrada" }, { status: 404 })
     }
 
     const baseUrlPath = process.env.NEXT_PUBLIC_BASE_PATH || ""
     const imageUrl = `${baseUrlPath}/files/${imagePath}`
     
-    console.log(`Imagem encontrada: ${imagePath}`)
+    console.log(`✅ Imagem encontrada: ${imagePath} -> ${imageUrl}`)
     return NextResponse.json({ url: imageUrl, path: imagePath })
   } catch (error) {
     console.error("Erro ao buscar imagem:", error)

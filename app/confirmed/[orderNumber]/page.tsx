@@ -79,7 +79,9 @@ export default function ConfirmedPage() {
     const basePath = process.env.NEXT_PUBLIC_BASE_PATH || ""
     // Remover extensão se existir para construir a URL corretamente
     const cleanCode = imageCode.replace(/\.(jpg|jpeg|png|gif|webp)$/i, '')
-    return `${basePath}/files/${cleanCode}.jpg`
+    // Remover pontos extras no final também
+    const finalCode = cleanCode.replace(/\.+$/, '')
+    return `${basePath}/files/${finalCode}.jpg`
   }
 
   const loadImageUrls = async (imageCodes: string[]) => {
