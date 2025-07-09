@@ -21,12 +21,11 @@ async function findImageByCode(imageCode: string): Promise<string | null> {
         const result = await searchRecursively(fullPath)
         if (result) return result
       } else if (item.isFile()) {
-        const fileName = path.parse(item.name).name
-        // Limpar o código da imagem removendo pontos extras no final
-        const cleanImageCode = imageCode.replace(/\.+$/, '')
-        const cleanFileName = fileName.replace(/\.+$/, '')
+        // Buscar pelo nome completo do arquivo (sem extensão)
+        const fileNameWithoutExt = path.parse(item.name).name
         
-        if (cleanFileName === cleanImageCode && /\.(jpg|jpeg|png|gif|webp)$/i.test(item.name)) {
+        // Comparar o código com o nome do arquivo (sem extensão)
+        if (fileNameWithoutExt === imageCode && /\.(jpg|jpeg|png|gif|webp)$/i.test(item.name)) {
           const relativePath = path.relative(basePath, fullPath)
           return relativePath
         }
