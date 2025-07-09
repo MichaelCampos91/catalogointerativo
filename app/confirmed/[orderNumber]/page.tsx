@@ -228,9 +228,9 @@ export default function ConfirmedPage() {
                         src={image.url}
                         alt={image.code}
                         className="object-cover w-full h-full"
-                        onError={(e) => {
+                         onError={(e) => {
                           console.error("Erro ao carregar imagem:", e.currentTarget.src)
-                          e.currentTarget.src = "/placeholder.svg"
+                          e.currentTarget.src = "/files/Z/placeholder.svg"
                         }}
                       />
                       ) : (
