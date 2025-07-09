@@ -223,6 +223,7 @@ export default function ConfirmedPage() {
                 <Card key={index} className="overflow-hidden">
                   <CardContent className="p-0">
                     <div className="relative aspect-square">
+                      {image.url ? (
                       <img
                         src={image.url}
                         alt={image.code}
@@ -232,6 +233,11 @@ export default function ConfirmedPage() {
                           e.currentTarget.src = "/placeholder.svg"
                         }}
                       />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <p className="text-gray-500">Imagem não encontrada</p>
+                        </div>
+                      )}
                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                         <img 
                           src="/logo.png" 
