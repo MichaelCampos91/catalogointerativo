@@ -77,8 +77,9 @@ export default function ConfirmedPage() {
 
   const getImageUrl = (imageCode: string) => {
     const basePath = process.env.NEXT_PUBLIC_BASE_PATH || ""
-    // Usar o nome completo do arquivo sem limpar caracteres
-    return `${basePath}/files/${imageCode}.jpg`
+    // Remover extensão se existir para construir a URL corretamente
+    const cleanCode = imageCode.replace(/\.(jpg|jpeg|png|gif|webp)$/i, '')
+    return `${basePath}/files/${cleanCode}.jpg`
   }
 
   const loadImageUrls = async (imageCodes: string[]) => {

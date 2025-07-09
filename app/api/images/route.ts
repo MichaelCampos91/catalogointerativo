@@ -24,12 +24,17 @@ async function findImageByCode(imageCode: string): Promise<string | null> {
         const fileName = item.name
         const fileNameWithoutExt = path.parse(item.name).name
         
+        // Limpar o código de busca removendo extensão se existir
+        const cleanImageCode = imageCode.replace(/\.(jpg|jpeg|png|gif|webp)$/i, '')
+        
         // Tentar diferentes formas de comparação
         const comparisons = [
-          fileNameWithoutExt === imageCode, // Comparação exata sem extensão
-          fileNameWithoutExt.replace(/\.+$/, '') === imageCode.replace(/\.+$/, ''), // Removendo pontos no final
-          fileNameWithoutExt.replace(/\s+/g, '') === imageCode.replace(/\s+/g, ''), // Removendo espaços
-          fileNameWithoutExt.replace(/[^\w-]/g, '') === imageCode.replace(/[^\w-]/g, ''), // Apenas letras, números e hífens
+          fileNameWithoutExt === cleanImageCode, // Comparação exata sem extensão
+          fileNameWithoutExt === imageCode, // Comparação com extensão (caso o arquivo tenha extensão no nome)
+          fileNameWithoutExt.replace(/\.+$/, '') === cleanImageCode.replace(/\.+$/, ''), // Removendo pontos no final
+          fileNameWithoutExt.replace(/\s+/g, '') === cleanImageCode.replace(/\s+/g, ''), // Removendo espaços
+          fileNameWithoutExt.replace(/[^\w-]/g, '') === cleanImageCode.replace(/[^\w-]/g, ''), // Apenas letras, números e hífens
+          fileName === imageCode, // Comparação exata com extensão
         ]
         
         if (comparisons.some(comp => comp) && /\.(jpg|jpeg|png|gif|webp)$/i.test(item.name)) {
