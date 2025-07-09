@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createOrder, getOrders, getOrdersByDate, updateOrderStatus } from "@/lib/database"
+import { createOrder, getOrders, getOrdersByDate, updateOrderStatus, getOrdersByOrderNumber } from "@/lib/database"
 
 export async function POST(request: Request) {
   try {
@@ -26,14 +26,20 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
     const date = searchParams.get("date")
+    const orderNumber = searchParams.get("order")
 
-    console.log(`API: Buscando pedidos${date ? ` para a data ${date}` : ""}...`)
-    const orders = date ? await getOrdersByDate(date) : await getOrders()
-    console.log(`API: ${orders.length} pedidos encontrados`)
+    let orders
+    if (orderNumber) {
+      orders = await getOrdersByOrderNumber(orderNumber)
+    } else if (date) {
+      orders = await getOrdersByDate(date)
+    } else {
+      orders = await getOrders()
+    }
+
     return NextResponse.json(orders)
   } catch (error) {
     console.error("API: Erro ao buscar pedidos:", error)
-    // Garantir que sempre retornamos JSON válido mesmo em caso de erro
     return NextResponse.json(
       {
         error: "Erro interno do servidor",

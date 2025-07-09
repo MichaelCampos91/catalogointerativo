@@ -105,12 +105,12 @@ export default function CatalogPage() {
 
   // Efeito para salvar itens selecionados no localStorage
   useEffect(() => {
-    if (selectedImages.length > 0) {
+    if (customerData && selectedImages.length > 0) {
       localStorage.setItem("selectedImages", JSON.stringify(selectedImages))
-    } else {
+    } else if (!customerData) {
       localStorage.removeItem("selectedImages")
     }
-  }, [selectedImages])
+  }, [selectedImages, customerData])
 
   // Função para formatar o tempo restante
   const formatTimeLeft = (seconds: number) => {
@@ -220,6 +220,12 @@ export default function CatalogPage() {
       localStorage.removeItem("customerData")
       localStorage.removeItem("sessionLocked")
       localStorage.removeItem("selectedImages")
+      localStorage.removeItem("catalogTimer")
+
+      // Limpar estado local
+      setCustomerData(null)
+      setSelectedImages([])
+      setTimeLeft(0)
 
       toast.success("Seu pedido foi confirmado! Conheça outros produtos em nossa loja...")
       
@@ -227,8 +233,8 @@ export default function CatalogPage() {
       setShowConfirmDialog(false)
       setIsAware(false)
 
-      // Redirecionar para outro site
-      router.push("https://descubra.lojacenario.com.br/")
+      // Redirecionar para a página de confirmação
+      router.push(`/confirmed/${customerData.orderNumber}`)
     } catch (error) {
       console.error("Erro ao salvar pedido:", error)
       setError(error instanceof Error ? error.message : "Erro ao salvar pedido")

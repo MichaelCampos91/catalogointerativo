@@ -87,6 +87,29 @@ export async function getOrdersByDate(date: string): Promise<Order[]> {
   }
 }
 
+// Função para buscar pedidos por número do pedido
+export async function getOrdersByOrderNumber(orderNumber: string): Promise<Order[]> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `SELECT * FROM orders 
+       WHERE "order" = $1 
+       ORDER BY created_at ASC`,
+      [orderNumber],
+    )
+    return result.rows.map((row) => ({
+      ...row,
+      selected_images: row.selected_images,
+    }))
+  } catch (error) {
+    console.error("Erro ao buscar pedidos por número:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
 // Função para verificar se já existe um pedido com o mesmo número
 export async function checkOrderExists(orderNumber: string): Promise<boolean> {
   let client
