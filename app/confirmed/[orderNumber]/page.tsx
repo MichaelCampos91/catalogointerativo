@@ -139,10 +139,6 @@ export default function ConfirmedPage() {
           <div className="flex items-center gap-4">
             <img className="w-[120px]" src="/logo.png" alt="Logo"/>
           </div>
-          <Button variant="outline" onClick={() => router.push("/")}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Voltar ao Início
-          </Button>
         </div>
 
         {/* Card de confirmação */}
