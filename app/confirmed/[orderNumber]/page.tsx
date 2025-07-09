@@ -125,11 +125,6 @@ export default function ConfirmedPage() {
             <CheckCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
             <h2 className="text-xl font-bold mb-2">Erro ao Carregar Pedido</h2>
             <p className="text-gray-600 mb-4">{error || "Pedido não encontrado"}</p>
-            <div className="space-y-2">
-              <Button onClick={() => router.push("/")} className="w-full">
-                Voltar ao Início
-              </Button>
-            </div>
           </CardContent>
         </Card>
       </div>
