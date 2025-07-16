@@ -24,16 +24,26 @@ import {
 } from "@/components/ui/breadcrumb"
 import { ArrowLeft, Folder, FileIcon, RefreshCw, Home, Plus, Upload, Trash2, ImagePlus, FolderPlus } from "lucide-react"
 
-type FileItem = {
+type Category = {
+  id: string
   name: string
-  path: string
-  isDirectory: boolean
-  url: string | null
+  slug: string
+  images: {
+    name: string
+    code: string
+    url: string
+    category: string
+  }[]
 }
 
 type FilesResponse = {
-  currentPath: string
-  items: FileItem[]
+  categories: Category[]
+  pagination: {
+    total: number
+    page: number
+    limit: number
+    totalPages: number
+  }
 }
 
 export default function FilesPage() {
@@ -45,7 +55,7 @@ export default function FilesPage() {
   const [showCreateFolder, setShowCreateFolder] = useState(false)
   const [newFolderName, setNewFolderName] = useState("")
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const [selectedFolder, setSelectedFolder] = useState<FileItem | null>(null)
+  const [selectedFolder, setSelectedFolder] = useState<Category | null>(null)
   const [deleteSuccess, setDeleteSuccess] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
@@ -93,7 +103,7 @@ export default function FilesPage() {
       const data = await response.json()
       console.log("Frontend: Arquivos carregados", { 
         itemCount: data.items?.length,
-        items: data.items?.map((item: FileItem) => ({ name: item.name, url: item.url, isDirectory: item.isDirectory }))
+        items: data.items?.map((item: Category) => ({ name: item.name, url: item.url, isDirectory: item.isDirectory }))
       })
       setFiles(data)
     } catch (error) {
@@ -179,43 +189,38 @@ export default function FilesPage() {
     }
   }
 
-  const handleDeleteItem = async (item: FileItem) => {
+  // Corrigir handleDeleteItem e modais para Category
+  const handleDeleteItem = async (cat: Category) => {
     try {
       setIsDeleting(true)
       setDeleteSuccess(false)
       const params = new URLSearchParams({
         dir: currentDir || "",
-        path: item.name
+        path: cat.name
       })
-
-      console.log("Frontend: Enviando requisição para excluir item", {
+      console.log("Frontend: Enviando requisição para excluir categoria", {
         dir: currentDir || "",
-        path: item.name,
-        isDirectory: item.isDirectory
+        path: cat.name
       })
-
       const response = await fetch(`/api/files?${params.toString()}`, {
         method: "DELETE"
       })
-
       const data = await response.json()
       console.log("Frontend: Resposta do servidor", { status: response.status, data })
-
       if (!response.ok) {
-        throw new Error(data.message || data.error || `Erro ao excluir ${item.isDirectory ? 'pasta' : 'arquivo'}`)
+        throw new Error(data.message || data.error || `Erro ao excluir pasta`)
       }
-
       setDeleteSuccess(true)
       toast({
         title: "Sucesso",
-        description: `${item.isDirectory ? 'Diretório' : 'Arquivo'} excluído com sucesso!`,
+        description: `Pasta excluída com sucesso!`,
       })
       loadFiles()
     } catch (error) {
-      console.error("Frontend: Erro ao excluir item", error)
+      console.error("Frontend: Erro ao excluir categoria", error)
       toast({
         title: "Erro",
-        description: error instanceof Error ? error.message : `Erro ao excluir ${item.isDirectory ? 'pasta' : 'arquivo'}`,
+        description: error instanceof Error ? error.message : `Erro ao excluir pasta`,
         variant: "destructive",
       })
       setShowDeleteConfirm(false)
@@ -284,14 +289,14 @@ export default function FilesPage() {
     }
   }
 
-  const filteredFiles = useMemo(() => {
-    if (!files?.items) return []
+  const filteredCategories = useMemo(() => {
+    if (!files?.categories) return []
     
-    return files.items.filter(item => {
+    return files.categories.filter(cat => {
       const searchLower = searchQuery.toLowerCase()
-      return item.name.toLowerCase().includes(searchLower)
+      return cat.name.toLowerCase().includes(searchLower)
     })
-  }, [files?.items, searchQuery])
+  }, [files?.categories, searchQuery])
 
   // Renderizar login se não estiver autenticado
   if (!isAuthenticated) {
@@ -456,7 +461,7 @@ export default function FilesPage() {
           <Card>
             <CardHeader>
               <CardTitle>{currentDir ? `Conteúdo de: ${currentDir}` : "Conteúdo da Pasta Raiz"}</CardTitle>
-              <CardDescription>{files.items.length} item(s) encontrado(s)</CardDescription>
+              <CardDescription>{files.categories.length} pasta(s) encontrada(s)</CardDescription>
             </CardHeader>
             <CardContent>
               {/* Parent directory button */}
@@ -466,90 +471,37 @@ export default function FilesPage() {
                   Pasta Superior
                 </Button>
               )}
-
-              {/* Files and folders grid */}
-              {files.items.length === 0 ? (
+              {/* Grid de categorias */}
+              {files.categories.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">Pasta vazia</div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                  {filteredFiles.map((item) => (
+                  {filteredCategories.map((cat) => (
                     <div
-                      key={item.path}
-                      className={`
-                        border rounded-lg overflow-hidden hover:shadow-md transition-shadow
-                        ${item.isDirectory ? "bg-blue-50" : "bg-white"}
-                      `}
+                      key={cat.id}
+                      className="border rounded-lg overflow-hidden hover:shadow-md transition-shadow bg-blue-50"
                     >
-                      {item.isDirectory ? (
-                        <div className="p-4 text-center">
-                          <div
-                            className="cursor-pointer"
-                            onClick={() => navigateTo(item.path)}
-                          >
-                            <Folder className="w-16 h-16 mx-auto text-blue-500 mb-2" />
-                            <p className="text-sm font-medium truncate">{item.name}</p>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="mt-2 text-red-500 hover:text-red-700 hover:bg-red-50"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setSelectedFolder(item)
-                              setShowDeleteConfirm(true)
-                            }}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
+                      <div className="p-4 text-center">
+                        <div
+                          className="cursor-pointer"
+                          onClick={() => navigateTo(cat.name)}
+                        >
+                          <Folder className="w-16 h-16 mx-auto text-blue-500 mb-2" />
+                          <p className="text-sm font-medium truncate">{cat.name}</p>
                         </div>
-                      ) : item.url && item.url.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
-                        <div className="flex flex-col h-full">
-                          <div className="relative aspect-square">
-                            <img 
-                              src={item.url} 
-                              alt={item.name} 
-                              className="object-cover w-full h-full"
-                              onError={(e) => {
-                                console.error("Erro ao carregar imagem:", item.url)
-                                e.currentTarget.src = "/placeholder.svg"
-                              }}
-                              onLoad={() => {
-                                console.log("Imagem carregada com sucesso:", item.url)
-                              }}
-                            />
-                          </div>
-                          <div className="p-2 text-center">
-                            <p className="text-sm font-medium truncate">{item.name}</p>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="mt-1 text-red-500 hover:text-red-700 hover:bg-red-50"
-                              onClick={() => {
-                                setSelectedFolder(item)
-                                setShowDeleteConfirm(true)
-                              }}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="p-4 text-center">
-                          <FileIcon className="w-16 h-16 mx-auto text-gray-400 mb-2" />
-                          <p className="text-sm font-medium truncate">{item.name}</p>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="mt-2 text-red-500 hover:text-red-700 hover:bg-red-50"
-                            onClick={() => {
-                              setSelectedFolder(item)
-                              setShowDeleteConfirm(true)
-                            }}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="mt-2 text-red-500 hover:text-red-700 hover:bg-red-50"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSelectedFolder(cat)
+                            setShowDeleteConfirm(true)
+                          }}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -594,7 +546,7 @@ export default function FilesPage() {
               <DialogTitle>
                 {deleteSuccess 
                   ? "Exclusão Concluída" 
-                  : `Excluir ${selectedFolder?.isDirectory ? 'Pasta' : 'Arquivo'}`
+                  : `Excluir Pasta`
                 }
               </DialogTitle>
               <DialogDescription>
@@ -616,14 +568,13 @@ export default function FilesPage() {
                       </svg>
                     </div>
                     <p className="text-green-600 font-medium">
-                      {selectedFolder?.isDirectory ? 'Pasta' : 'Arquivo'} excluído com sucesso!
+                      Pasta excluída com sucesso!
                     </p>
                   </div>
                 ) : (
                   <>
-                    Tem certeza que deseja excluir {selectedFolder?.isDirectory ? 'a pasta' : 'o arquivo'} "{selectedFolder?.name}"?
-                    {selectedFolder?.isDirectory && " Todos os arquivos dentro dela serão excluídos."}
-                    Esta ação não pode ser desfeita.
+                    Tem certeza que deseja excluir a pasta "{selectedFolder?.name}"?
+                    Todos os arquivos dentro dela serão excluídos. Esta ação não pode ser desfeita.
                   </>
                 )}
               </DialogDescription>
