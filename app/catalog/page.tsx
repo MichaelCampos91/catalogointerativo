@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -119,7 +119,8 @@ export default function CatalogPage() {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`
   }
 
-  const loadCatalogData = async (page = 1, category?: string) => {
+  // Função para carregar dados do catálogo
+  const loadCatalogData = async (page = 1, search = "") => {
     try {
       setError(null)
       if (page === 1) {
@@ -130,30 +131,42 @@ export default function CatalogPage() {
 
       const queryParams = new URLSearchParams({
         page: page.toString(),
-        limit: pagination.limit.toString()
+        limit: pagination.limit.toString(),
       })
-      
-      if (category) {
-        queryParams.append('category', category)
+      if (search) {
+        queryParams.append('search', search)
       }
 
-      // Carregar dados do catálogo
-      const response = await fetch(`/api/catalog?${queryParams.toString()}`)
-
+      // Chamar novo endpoint dinâmico
+      const response = await fetch(`/api/files?${queryParams.toString()}`)
       if (!response.ok) {
         const errorData = await response.json()
         throw new Error(`Erro ao carregar catálogo: ${errorData.message || response.status}`)
       }
-
       const data = await response.json()
 
+      // Adaptar para novo formato
+      const newCategories = data.categories.map((cat: any) => ({
+        id: cat.id,
+        name: cat.name,
+        slug: cat.slug,
+      }))
+      const newImages = data.categories.flatMap((cat: any) =>
+        cat.images.map((img: any) => ({
+          id: img.code,
+          code: img.code,
+          category_id: cat.id,
+          image_url: img.url,
+          thumbnail_url: null,
+        }))
+      )
       if (page === 1) {
-        setCategories(data.categories || [])
-        setImages(data.images || [])
+        setCategories(newCategories)
+        setImages(newImages)
       } else {
-        setImages(prev => [...prev, ...data.images])
+        setCategories((prev) => [...prev, ...newCategories])
+        setImages((prev) => [...prev, ...newImages])
       }
-      
       setPagination(data.pagination)
     } catch (error) {
       console.error("Erro ao carregar dados:", error)
@@ -164,9 +177,27 @@ export default function CatalogPage() {
     }
   }
 
+  // Debounce para busca
+  const debounceTimeout = useRef<NodeJS.Timeout | null>(null)
+  useEffect(() => {
+    if (debounceTimeout.current) {
+      clearTimeout(debounceTimeout.current)
+    }
+    debounceTimeout.current = setTimeout(() => {
+      loadCatalogData(1, searchQuery)
+    }, 600)
+    return () => {
+      if (debounceTimeout.current) {
+        clearTimeout(debounceTimeout.current)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery])
+
+  // Atualizar scroll para paginação
   const loadMore = () => {
     if (pagination.page < pagination.totalPages && !loadingMore) {
-      loadCatalogData(pagination.page + 1)
+      loadCatalogData(pagination.page + 1, searchQuery)
     }
   }
 
@@ -248,14 +279,11 @@ export default function CatalogPage() {
     return images.filter((img) => img.category_id === categoryId)
   }
 
-  // Função para filtrar categorias baseado na busca
+  // Função para filtrar categorias baseado na busca (agora só filtra localmente se searchQuery vazio)
   const getFilteredCategories = () => {
     if (!searchQuery.trim()) return categories
-
-    const query = searchQuery.toLowerCase()
-    return categories.filter(category => 
-      category.name.toLowerCase().includes(query)
-    )
+    // Se searchQuery existe, categorias já vêm filtradas do backend
+    return categories
   }
 
   if (loading) {

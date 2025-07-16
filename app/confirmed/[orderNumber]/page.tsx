@@ -84,6 +84,8 @@ export default function ConfirmedPage() {
     return `${basePath}/files/${finalCode}.jpg`
   }
 
+  const PLACEHOLDER_URL = "/files/Z/placeholder.svg"
+
   const loadImageUrls = async (imageCodes: string[]) => {
     try {
       const urls: ImageUrl[] = []
@@ -93,15 +95,15 @@ export default function ConfirmedPage() {
           const data = await response.json()
           urls.push({ code, url: data.url })
         } else {
-          // Fallback para o caminho padrão se a API falhar
-          urls.push({ code, url: getImageUrl(code) })
+          // Fallback para placeholder se a API falhar
+          urls.push({ code, url: PLACEHOLDER_URL })
         }
       }
       setImageUrls(urls)
     } catch (error) {
       console.error("Erro ao carregar URLs das imagens:", error)
-      // Fallback para caminhos padrão
-      const urls = imageCodes.map(code => ({ code, url: getImageUrl(code) }))
+      // Fallback para placeholder
+      const urls = imageCodes.map(code => ({ code, url: PLACEHOLDER_URL }))
       setImageUrls(urls)
     }
   }
@@ -216,21 +218,16 @@ export default function ConfirmedPage() {
                 <Card key={index} className="overflow-hidden">
                   <CardContent className="p-0">
                     <div className="relative aspect-square">
-                      {image.url ? (
                       <img
                         src={image.url}
                         alt={image.code}
                         className="object-cover w-full h-full"
-                         onError={(e) => {
-                          console.error("Erro ao carregar imagem:", e.currentTarget.src)
-                          e.currentTarget.src = "/files/Z/placeholder.svg"
+                        onError={(e) => {
+                          if (e.currentTarget.src !== window.location.origin + PLACEHOLDER_URL) {
+                            e.currentTarget.src = PLACEHOLDER_URL
+                          }
                         }}
                       />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <p className="text-gray-500">Imagem não encontrada</p>
-                        </div>
-                      )}
                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                         <img 
                           src="/logo.png" 

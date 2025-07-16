@@ -2,6 +2,11 @@ import { NextResponse } from "next/server"
 import fs from "fs"
 import path from "path"
 
+// Função utilitária para normalizar códigos (remove espaços, pontos, case-insensitive)
+function normalizeCode(str: string) {
+  return str.replace(/\s+/g, '').replace(/\.+$/, '').replace(/\.(jpg|jpeg|png|gif|webp)$/i, '').toLowerCase();
+}
+
 // Função para encontrar uma imagem pelo código
 async function findImageByCode(imageCode: string): Promise<string | null> {
   const basePath = path.join(process.cwd(), "public", "files")
@@ -10,53 +15,47 @@ async function findImageByCode(imageCode: string): Promise<string | null> {
     return null
   }
 
+  const normalizedSearch = normalizeCode(imageCode)
+
+  // 1. Buscar correspondência exata (após normalização)
+  let exactMatch: string | null = null
+  // 2. Buscar correspondência flexível (ignorar apenas caracteres especiais, mas não substring)
+  let flexibleMatch: string | null = null
+
   // Função recursiva para buscar a imagem
-  const searchRecursively = async (dirPath: string): Promise<string | null> => {
+  const searchRecursively = async (dirPath: string): Promise<void> => {
     const items = await fs.promises.readdir(dirPath, { withFileTypes: true })
-    
     for (const item of items) {
       const fullPath = path.join(dirPath, item.name)
-      
       if (item.isDirectory()) {
-        const result = await searchRecursively(fullPath)
-        if (result) return result
+        await searchRecursively(fullPath)
+        if (exactMatch) return
       } else if (item.isFile()) {
         const fileName = item.name
         const fileNameWithoutExt = path.parse(item.name).name
-        
-        // Log apenas alguns arquivos para debug (evitar spam)
-        if (Math.random() < 0.01) { // 1% dos arquivos
-          console.log(`Verificando arquivo: "${fileNameWithoutExt}" vs código: "${imageCode}"`)
+        const normalizedFile = normalizeCode(fileNameWithoutExt)
+        // 1. Correspondência exata (após normalização)
+        if (!exactMatch && normalizedFile === normalizedSearch && /\.(jpg|jpeg|png|gif|webp)$/i.test(fileName)) {
+          exactMatch = path.relative(basePath, fullPath)
+          return
         }
-        
-        // Limpar o código de busca removendo extensão se existir
-        const cleanImageCode = imageCode.replace(/\.(jpg|jpeg|png|gif|webp)$/i, '')
-        
-        // Tentar diferentes formas de comparação
-        const comparisons = [
-          fileNameWithoutExt === cleanImageCode, // Comparação exata sem extensão
-          fileNameWithoutExt === imageCode, // Comparação com extensão (caso o arquivo tenha extensão no nome)
-          fileNameWithoutExt.replace(/\.+$/, '') === cleanImageCode.replace(/\.+$/, ''), // Removendo pontos no final
-          fileNameWithoutExt.replace(/\s+/g, '') === cleanImageCode.replace(/\s+/g, ''), // Removendo espaços
-          fileNameWithoutExt.replace(/[^\w-]/g, '') === cleanImageCode.replace(/[^\w-]/g, ''), // Apenas letras, números e hífens
-          fileName === imageCode, // Comparação exata com extensão
-          // Busca mais flexível - verificar se o código está contido no nome do arquivo
-          fileNameWithoutExt.toLowerCase().includes(cleanImageCode.toLowerCase()),
-          cleanImageCode.toLowerCase().includes(fileNameWithoutExt.toLowerCase()),
-        ]
-        
-        if (comparisons.some(comp => comp) && /\.(jpg|jpeg|png|gif|webp)$/i.test(item.name)) {
-          console.log(`✅ Match encontrado: arquivo="${fileNameWithoutExt}" código="${imageCode}" comparações=${comparisons.map(c => c ? '✓' : '✗').join('')}`)
-          const relativePath = path.relative(basePath, fullPath)
-          return relativePath
+        // 2. Correspondência flexível: ignora apenas caracteres especiais, mas não aceita substring pura
+        if (!flexibleMatch && !exactMatch) {
+          // Remove tudo que não é letra, número ou hífen
+          const alnumFile = normalizedFile.replace(/[^\w-]/g, '')
+          const alnumSearch = normalizedSearch.replace(/[^\w-]/g, '')
+          if (alnumFile === alnumSearch && /\.(jpg|jpeg|png|gif|webp)$/i.test(fileName)) {
+            flexibleMatch = path.relative(basePath, fullPath)
+          }
         }
       }
     }
-    
-    return null
   }
 
-  return await searchRecursively(basePath)
+  await searchRecursively(basePath)
+  if (exactMatch) return exactMatch
+  if (flexibleMatch) return flexibleMatch
+  return null
 }
 
 export async function GET(request: Request) {

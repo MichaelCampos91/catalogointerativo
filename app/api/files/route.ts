@@ -23,96 +23,68 @@ function validatePath(dir: string) {
   return targetPath
 }
 
-/* old GET
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
     const dir = searchParams.get("dir") || ""
+    const search = searchParams.get("search")?.toLowerCase() || ""
+    const page = parseInt(searchParams.get("page") || "1", 10)
+    const limit = parseInt(searchParams.get("limit") || "50", 10)
 
     const targetPath = validatePath(dir)
-    
     if (!fs.existsSync(targetPath)) {
       return NextResponse.json({ error: "Diretório não encontrado" }, { status: 404 })
     }
 
+    // Listar categorias (pastas)
     const items = fs.readdirSync(targetPath, { withFileTypes: true })
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || ""
-    const basePath = process.env.NEXT_PUBLIC_BASE_PATH || ""
+    let categories = items.filter((item) => item.isDirectory())
+    if (search) {
+      categories = categories.filter((cat) => cat.name.toLowerCase().includes(search))
+    }
 
-    const files = items.map((item) => {
-      const itemPath = path.join(dir, item.name)
-      const fullPath = path.join(targetPath, item.name)
-      const stats = fs.statSync(fullPath)
-      
-      // Construir URL corretamente com o caminho base
-      let url = null
-      if (!item.isDirectory()) {
-        if (dir) {
-          // Se estamos em uma subpasta, incluir o diretório na URL
-          url = `/files/${dir}/${item.name}`
-          console.log("API: URL construída", { itemName: item.name, dir, url, basePath })
-        } else {
-          // Se estamos na pasta raiz
-          url = `/files/${item.name}`
+    // Paginação de categorias
+    const totalCategories = categories.length
+    const totalPages = Math.max(1, Math.ceil(totalCategories / limit))
+    const paginatedCategories = categories.slice((page - 1) * limit, page * limit)
+
+    // Para cada categoria, listar imagens
+    const categoriesWithImages = paginatedCategories.map((cat) => {
+      const categoryPath = path.join(targetPath, cat.name)
+      let images: any[] = []
+      try {
+        const files = fs.readdirSync(categoryPath, { withFileTypes: true })
+        images = files
+          .filter((file) => file.isFile() && /\.(jpg|jpeg|png|webp)$/i.test(file.name))
+          .map((file) => ({
+            name: file.name,
+            code: path.parse(file.name).name,
+            url: `/files/${dir ? dir + '/' : ''}${cat.name}/${file.name}`,
+            category: cat.name
+          }))
+        // Se houver busca, filtrar imagens também
+        if (search) {
+          images = images.filter((img) => img.code.toLowerCase().includes(search) || img.name.toLowerCase().includes(search))
         }
+      } catch (e) {
+        images = []
       }
-      
       return {
-        name: item.name,
-        path: itemPath,
-        isDirectory: item.isDirectory(),
-        url: url,
-        size: stats.size,
-        modified: stats.mtime
+        id: cat.name,
+        name: cat.name,
+        slug: cat.name.toLowerCase().replace(/\s+/g, '-'),
+        images
       }
     })
 
     return NextResponse.json({
-      currentPath: dir,
-      items: files
-    })
-  } catch (error) {
-    console.error("Erro ao listar arquivos:", error)
-    return NextResponse.json(
-      { error: "Erro ao listar arquivos", message: error instanceof Error ? error.message : "Erro desconhecido" },
-      { status: 500 }
-    )
-  }
-}
-*/
-
-export async function GET(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url)
-    const dir = searchParams.get("dir") || ""
-
-    const targetPath = validatePath(dir)
-    
-    if (!fs.existsSync(targetPath)) {
-      return NextResponse.json({ error: "Diretório não encontrado" }, { status: 404 })
-    }
-
-    const items = fs.readdirSync(targetPath, { withFileTypes: true })
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || ""
-
-    const files = items.map((item) => {
-      const itemPath = path.join(dir, item.name)
-      const fullPath = path.join(targetPath, item.name)
-      const stats = fs.statSync(fullPath)
-      
-      return {
-        name: item.name,
-        path: itemPath,
-        isDirectory: item.isDirectory(),
-        url: item.isDirectory() ? null : `/files/${itemPath}`,
-        size: stats.size,
-        modified: stats.mtime
+      categories: categoriesWithImages,
+      pagination: {
+        total: totalCategories,
+        page,
+        limit,
+        totalPages
       }
-    })
-
-    return NextResponse.json({
-      currentPath: dir,
-      items: files
     })
   } catch (error) {
     console.error("Erro ao listar arquivos:", error)
