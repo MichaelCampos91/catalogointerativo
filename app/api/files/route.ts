@@ -23,6 +23,16 @@ function validatePath(dir: string) {
   return targetPath
 }
 
+// Função para normalizar strings (remover acentos, espaços extras e minúsculas)
+function normalize(str: string) {
+  return str
+    .normalize('NFD')
+    .replace(/[ -]/g, '') // remove acentos
+    .replace(/\s+/g, ' ')           // espaços múltiplos para um só
+    .trim()                          // remove espaços nas pontas
+    .toLowerCase()
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -40,7 +50,8 @@ export async function GET(request: Request) {
     const items = fs.readdirSync(targetPath, { withFileTypes: true })
     let categories = items.filter((item) => item.isDirectory())
     if (search) {
-      categories = categories.filter((cat) => cat.name.toLowerCase().includes(search))
+      const normalizedSearch = normalize(search)
+      categories = categories.filter((cat) => normalize(cat.name).includes(normalizedSearch))
     }
 
     // Paginação de categorias
@@ -48,7 +59,7 @@ export async function GET(request: Request) {
     const totalPages = Math.max(1, Math.ceil(totalCategories / limit))
     const paginatedCategories = categories.slice((page - 1) * limit, page * limit)
 
-    // Para cada categoria, listar imagens
+    // Para cada categoria, listar todas as imagens (sem filtrar pelo termo de busca)
     const categoriesWithImages = paginatedCategories.map((cat) => {
       const categoryPath = path.join(targetPath, cat.name)
       let images: any[] = []
@@ -62,10 +73,6 @@ export async function GET(request: Request) {
             url: `/files/${dir ? dir + '/' : ''}${cat.name}/${file.name}`,
             category: cat.name
           }))
-        // Se houver busca, filtrar imagens também
-        if (search) {
-          images = images.filter((img) => img.code.toLowerCase().includes(search) || img.name.toLowerCase().includes(search))
-        }
       } catch (e) {
         images = []
       }

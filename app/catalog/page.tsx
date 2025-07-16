@@ -145,6 +145,11 @@ export default function CatalogPage() {
       }
       const data = await response.json()
 
+      // DEBUG: Exibir o termo buscado e o resultado retornado
+      // console.log('[CATALOG SEARCH] Termo buscado:', search)
+      // console.log('[CATALOG SEARCH] Categorias retornadas:', data.categories)
+      // console.log('[CATALOG SEARCH] Imagens retornadas:', data.categories.flatMap((cat: any) => cat.images))
+
       // Adaptar para novo formato
       const newCategories = data.categories.map((cat: any) => ({
         id: cat.id,
