@@ -38,6 +38,12 @@ type Category = {
 
 type FilesResponse = {
   categories: Category[]
+  images?: {
+    name: string
+    code: string
+    url: string
+    category: string
+  }[]
   pagination: {
     total: number
     page: number
@@ -91,7 +97,6 @@ export default function FilesPage() {
 
       // Remover "files" do início do caminho se existir
       const cleanDir = currentDir.startsWith("files/") ? currentDir.slice(6) : currentDir
-      console.log("Frontend: Carregando arquivos", { currentDir, cleanDir })
       
       const response = await fetch(`/api/files?dir=${encodeURIComponent(cleanDir)}`)
 
@@ -101,10 +106,6 @@ export default function FilesPage() {
       }
 
       const data = await response.json()
-      console.log("Frontend: Arquivos carregados", { 
-        itemCount: data.items?.length,
-        items: data.items?.map((item: Category) => ({ name: item.name, url: item.url, isDirectory: item.isDirectory }))
-      })
       setFiles(data)
     } catch (error) {
       console.error("Erro ao carregar arquivos:", error)
@@ -152,19 +153,12 @@ export default function FilesPage() {
       formData.append("dir", currentDir || "")
       formData.append("folderName", newFolderName)
 
-      console.log("Frontend: Enviando requisição para criar pasta", {
-        action: "createFolder",
-        dir: currentDir || "",
-        folderName: newFolderName
-      })
-
       const response = await fetch("/api/files", {
         method: "POST",
         body: formData,
       })
 
       const data = await response.json()
-      console.log("Frontend: Resposta do servidor", { status: response.status, data })
 
       if (!response.ok) {
         throw new Error(data.message || data.error || "Erro ao criar pasta")
@@ -198,15 +192,10 @@ export default function FilesPage() {
         dir: currentDir || "",
         path: cat.name
       })
-      console.log("Frontend: Enviando requisição para excluir categoria", {
-        dir: currentDir || "",
-        path: cat.name
-      })
       const response = await fetch(`/api/files?${params.toString()}`, {
         method: "DELETE"
       })
       const data = await response.json()
-      console.log("Frontend: Resposta do servidor", { status: response.status, data })
       if (!response.ok) {
         throw new Error(data.message || data.error || `Erro ao excluir pasta`)
       }
@@ -250,13 +239,6 @@ export default function FilesPage() {
       formData.append("dir", cleanDir)
       formData.append("file", files[0])
 
-      console.log("Frontend: Enviando upload", { 
-        fileName: files[0].name, 
-        currentDir, 
-        cleanDir,
-        fileSize: files[0].size 
-      })
-
       const response = await fetch("/api/files", {
         method: "POST",
         body: formData,
@@ -266,8 +248,6 @@ export default function FilesPage() {
         const error = await response.json()
         throw new Error(error.message || "Erro ao fazer upload do arquivo")
       }
-
-      console.log("Frontend: Upload realizado com sucesso")
 
       toast({
         title: "Sucesso",
@@ -297,6 +277,38 @@ export default function FilesPage() {
       return cat.name.toLowerCase().includes(searchLower)
     })
   }, [files?.categories, searchQuery])
+
+  // Adicionar função para deletar imagem individual
+  const handleDeleteImage = async (img: { name: string; code: string; url: string; category: string }) => {
+    if (!window.confirm(`Tem certeza que deseja excluir a imagem "${img.name}"?`)) return;
+    try {
+      setLoading(true);
+      const params = new URLSearchParams({
+        dir: currentDir || "",
+        path: img.name
+      });
+      const response = await fetch(`/api/files?${params.toString()}`, {
+        method: "DELETE"
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || data.error || `Erro ao excluir imagem`);
+      }
+      toast({
+        title: "Sucesso",
+        description: `Imagem excluída com sucesso!`
+      });
+      loadFiles();
+    } catch (error) {
+      toast({
+        title: "Erro",
+        description: error instanceof Error ? error.message : `Erro ao excluir imagem`,
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
 
   // Renderizar login se não estiver autenticado
   if (!isAuthenticated) {
@@ -472,7 +484,29 @@ export default function FilesPage() {
                 </Button>
               )}
               {/* Grid de categorias */}
-              {files.categories.length === 0 ? (
+              {files.categories.length === 0 && files.images && files.images.length > 0 && currentDir.trim() !== "" ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                  {files.images.map((img) => (
+                    <div key={img.code} className="border rounded-lg overflow-hidden bg-white flex flex-col items-center p-4 relative">
+                      <img
+                        src={img.url}
+                        alt={img.name}
+                        className="w-full h-32 object-cover rounded mb-2"
+                      />
+                      <p className="text-sm font-medium truncate w-full text-center">{img.name}</p>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="absolute top-2 right-2 text-red-500 hover:text-red-700 hover:bg-red-50"
+                        onClick={() => handleDeleteImage(img)}
+                        title="Excluir imagem"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : files.categories.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">Pasta vazia</div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
@@ -489,6 +523,19 @@ export default function FilesPage() {
                           <Folder className="w-16 h-16 mx-auto text-blue-500 mb-2" />
                           <p className="text-sm font-medium truncate">{cat.name}</p>
                         </div>
+                        {/* Removido: prévias das imagens dentro do card da pasta */}
+                        {/* {cat.images && cat.images.length > 0 && (
+                          <div className="grid grid-cols-2 gap-2 mt-2">
+                            {cat.images.map((img) => (
+                              <img
+                                key={img.code}
+                                src={img.url}
+                                alt={img.name}
+                                className="w-full h-20 object-cover rounded"
+                              />
+                            ))}
+                          </div>
+                        )} */}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -498,6 +545,7 @@ export default function FilesPage() {
                             setSelectedFolder(cat)
                             setShowDeleteConfirm(true)
                           }}
+                          title="Excluir pasta"
                         >
                           <Trash2 className="w-4 h-4" />
                         </Button>

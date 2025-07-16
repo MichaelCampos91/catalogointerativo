@@ -84,8 +84,24 @@ export async function GET(request: Request) {
       }
     })
 
+    // Listar imagens do diretório atual (não das subpastas)
+    let currentDirImages: any[] = []
+    try {
+      currentDirImages = items
+        .filter((item) => item.isFile() && /\.(jpg|jpeg|png|webp)$/i.test(item.name))
+        .map((file) => ({
+          name: file.name,
+          code: path.parse(file.name).name,
+          url: `/files/${dir ? dir + '/' : ''}${file.name}`,
+          category: dir || ''
+        }))
+    } catch (e) {
+      currentDirImages = []
+    }
+
     return NextResponse.json({
       categories: categoriesWithImages,
+      images: currentDirImages,
       pagination: {
         total: totalCategories,
         page,
