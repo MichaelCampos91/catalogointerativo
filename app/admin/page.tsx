@@ -1065,7 +1065,7 @@ export default function AdminPage() {
                     headers: {
                       "Content-Type": "application/json",
                     },
-                    body: JSON.stringify({ id: selectedOrderToClose.id }),
+                    body: JSON.stringify({ id: selectedOrderToClose.order }),
                   })
       
                   if (!response.ok) throw new Error("Erro ao concluir pedido")

@@ -79,7 +79,7 @@ export async function PATCH(request: Request) {
     }
 
     console.log(`API: Concluindo pedido ${id}...`)
-    const updatedOrder = await updateOrderStatus(id, false)
+    const updatedOrder = await updateOrderStatus(orders[0].id, false)
 
     return NextResponse.json(updatedOrder)
   } catch (error) {
