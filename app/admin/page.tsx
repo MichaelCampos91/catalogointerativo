@@ -398,7 +398,23 @@ export default function AdminPage() {
       return
     }
     try {
-      // Finalizar pedidos selecionados
+      // Verificar se todos os pedidos já estão finalizados (quando filtro é 'finalized')
+      if (filterPending === "finalized") {
+        const allFinalized = selectedOrdersForList.every(id => {
+          const order = orders.find(o => o.id === id)
+          return order && !!order.finalized_at
+        })
+        
+        if (allFinalized) {
+          // Se todos já estão finalizados, apenas exibir a lista
+          console.log("[handleGenerateList] Todos os pedidos já finalizados, exibindo lista...")
+          setListDialogOpen(true)
+          return
+        }
+      }
+      
+      // Finalizar pedidos selecionados (apenas se não estiverem finalizados)
+      console.log("[handleGenerateList] IDs selecionados:", selectedOrdersForList)
       const response = await fetch("/api/orders", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -409,6 +425,7 @@ export default function AdminPage() {
         throw new Error(errorData.message || "Erro ao finalizar pedidos")
       }
       const updated = await response.json()
+      console.log("[handleGenerateList] Pedidos finalizados retornados:", updated)
       // Atualizar lista local
       setOrders((prev) =>
         prev.map((order) => {
@@ -502,15 +519,26 @@ export default function AdminPage() {
   // Nova função: checa se todos os pedidos selecionados estão em produção
   const canGenerateList = () => {
     if (selectedOrdersForList.length === 0) return false
-    return selectedOrdersForList.every(id => {
-      const order = orders.find(o => o.id === id)
-      return order && order.in_production && !order.finalized_at
-    })
+    if (filterPending === "in_production") {
+      // Lógica atual
+      return selectedOrdersForList.every(id => {
+        const order = orders.find(o => o.id === id)
+        return order && order.in_production && !order.finalized_at
+      })
+    }
+    if (filterPending === "finalized" && finalizedDateFilter) {
+      // Nova lógica para finalizados
+      return selectedOrdersForList.every(id => {
+        const order = orders.find(o => o.id === id)
+        return order && !!order.finalized_at
+      })
+    }
+    return false
   }
 
-  // Atualizar shouldShowSpecialCheckboxes para depender só do filtro de status
+  // Atualizar shouldShowSpecialCheckboxes para depender do filtro de status e data de finalização
   const shouldShowSpecialCheckboxes = () => {
-    return filterPending === "in_production"
+    return filterPending === "in_production" || (filterPending === "finalized" && finalizedDateFilter)
   }
 
   // Função para gerar a referência do pedido
@@ -843,7 +871,7 @@ export default function AdminPage() {
               {selectedOrders.length > 0 && (
                 <Button
                   onClick={() => setProductionDialogOpen(true)}
-                  className="bg-orange-600 hover:bg-orange-700 text-white"
+                  className="bg-primary hover:bg-primary/20 text-white"
                 >
                   🏭 Colocar em Produção ({selectedOrders.length})
                 </Button>
@@ -1114,7 +1142,7 @@ export default function AdminPage() {
             </Button>
             <Button
               onClick={handleMarkInProduction}
-              className="bg-orange-600 hover:bg-orange-700"
+              className="bg-primary hover:bg-primary/20"
             >
               Confirmar
             </Button>
@@ -1129,7 +1157,7 @@ export default function AdminPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-1 gap-4">
-              {filteredOrders
+              {orders
                 .filter(order => selectedOrdersForList.includes(order.id))
                 .map((order) => (
                   <Card key={order.id}>

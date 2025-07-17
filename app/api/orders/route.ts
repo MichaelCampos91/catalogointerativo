@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createOrder, getOrders, getOrdersByDate, getOrdersByCompletionDate, getOrdersByProductionDate, updateOrderStatus, getOrdersByOrderNumber, markOrdersInProduction, finalizeOrders } from "@/lib/database"
+import { createOrder, getOrders, getOrdersByDate, getOrdersByCompletionDate, getOrdersByProductionDate, updateOrderStatus, getOrdersByOrderNumber, markOrdersInProduction, finalizeOrders, getOrderById } from "@/lib/database"
 
 export async function POST(request: Request) {
   try {
@@ -107,8 +107,8 @@ export async function PUT(request: Request) {
     // Antes de marcar em produção, garantir que não estão finalizados
     // (busca todos os pedidos e verifica)
     // Se algum estiver finalizado, retorna erro
-    const orders = await Promise.all(orderIds.map((id: string) => getOrdersByOrderNumber(id)))
-    if (orders.some(orderArr => orderArr.length === 0 || orderArr[0].finalized_at)) {
+    const orders = await Promise.all(orderIds.map((id: string) => getOrderById(id)))
+    if (orders.some(order => !order || order.finalized_at)) {
       return NextResponse.json({ error: "Alguns pedidos já estão finalizados ou não encontrados" }, { status: 400 })
     }
 

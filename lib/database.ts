@@ -336,3 +336,25 @@ export async function finalizeOrders(orderIds: string[]): Promise<Order[]> {
   }
 }
 
+// Função para buscar pedido por UUID
+export async function getOrderById(id: string): Promise<Order | null> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `SELECT * FROM orders WHERE id = $1`,
+      [id],
+    )
+    if (result.rows.length === 0) return null
+    return {
+      ...result.rows[0],
+      selected_images: result.rows[0].selected_images,
+    }
+  } catch (error) {
+    console.error("Erro ao buscar pedido por ID:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
