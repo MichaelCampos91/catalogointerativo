@@ -672,6 +672,7 @@ export default function AdminPage() {
 
         {/* Filtros */}
         
+        
         <div className="grid grid-cols-4 gap-4 mb-6">
           <Card>
             <CardContent className="p-4">
@@ -746,9 +747,7 @@ export default function AdminPage() {
               </div>
             </CardContent>
           </Card>
-        </div>
-
-        <div className="grid grid-cols-4 gap-4 mb-6">
+      
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -772,6 +771,7 @@ export default function AdminPage() {
               </div>
             </CardContent>
           </Card>
+          
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -855,7 +855,7 @@ export default function AdminPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto overflow-y-auto max-h-[320px]">
+            <div className="overflow-x-auto overflow-y-auto max-h-[380px]">
               <Table>
                 <TableHeader>
                   <TableRow>
