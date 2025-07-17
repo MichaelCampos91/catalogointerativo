@@ -673,7 +673,7 @@ export default function AdminPage() {
         {/* Filtros */}
         
         
-        <div className="grid grid-cols-4 gap-4 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
           {/* Total de Pedidos */}
           <Card className="col-span-1">
             <CardContent className="p-4">
@@ -750,7 +750,7 @@ export default function AdminPage() {
           </Card>
         </div>
 
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           {/* Em produção desde */}
           <Card className="col-span-1">
             <CardContent className="p-4">
