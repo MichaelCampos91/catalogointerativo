@@ -627,7 +627,7 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-6xl mx-auto w-full">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Painel Administrativo</h1>
@@ -673,8 +673,9 @@ export default function AdminPage() {
         {/* Filtros */}
         
         
-        <div className="grid grid-cols-4 gap-4 mb-6">
-          <Card>
+        <div className="grid grid-cols-4 gap-4 mb-4">
+          {/* Total de Pedidos */}
+          <Card className="col-span-1">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -685,8 +686,8 @@ export default function AdminPage() {
               </div>
             </CardContent>
           </Card>
-          
-          <Card>
+          {/* Total de Clientes */}
+          <Card className="col-span-1">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -699,8 +700,8 @@ export default function AdminPage() {
               </div>
             </CardContent>
           </Card> 
-
-          <Card>
+          {/* Criado em */}
+          <Card className="col-span-1">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -723,8 +724,8 @@ export default function AdminPage() {
               </div>
             </CardContent>
           </Card>
-
-          <Card>
+          {/* Arte Montada em */}
+          <Card className="col-span-1">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -747,8 +748,11 @@ export default function AdminPage() {
               </div>
             </CardContent>
           </Card>
-      
-          <Card>
+        </div>
+
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          {/* Em produção desde */}
+          <Card className="col-span-1">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -771,8 +775,8 @@ export default function AdminPage() {
               </div>
             </CardContent>
           </Card>
-          
-          <Card>
+          {/* Finalizado em */}
+          <Card className="col-span-1">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -855,7 +859,7 @@ export default function AdminPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto overflow-y-auto max-h-[380px]">
+            <div className="overflow-x-auto overflow-y-auto max-h-[320px]">
               <Table>
                 <TableHeader>
                   <TableRow>
