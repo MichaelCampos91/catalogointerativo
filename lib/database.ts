@@ -35,6 +35,9 @@ export type Order = {
   created_at: string
   updated_at: string
   is_pending: boolean
+  in_production: boolean
+  in_production_at: string | null
+  finalized_at: string | null
 }
 
 export type CreateOrder = {
@@ -81,6 +84,52 @@ export async function getOrdersByDate(date: string): Promise<Order[]> {
     }))
   } catch (error) {
     console.error("Erro ao buscar pedidos por data:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+// Função para buscar pedidos por data de conclusão
+export async function getOrdersByCompletionDate(date: string): Promise<Order[]> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `SELECT * FROM orders 
+       WHERE DATE(updated_at) = $1 AND is_pending = false
+       ORDER BY updated_at ASC`,
+      [date],
+    )
+    return result.rows.map((row) => ({
+      ...row,
+      selected_images: row.selected_images,
+    }))
+  } catch (error) {
+    console.error("Erro ao buscar pedidos por data de conclusão:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+// Função para buscar pedidos por data de produção
+export async function getOrdersByProductionDate(date: string): Promise<Order[]> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `SELECT * FROM orders 
+       WHERE DATE(in_production_at) = $1 AND in_production = true
+       ORDER BY in_production_at ASC`,
+      [date],
+    )
+    return result.rows.map((row) => ({
+      ...row,
+      selected_images: row.selected_images,
+    }))
+  } catch (error) {
+    console.error("Erro ao buscar pedidos por data de produção:", error)
     throw error
   } finally {
     if (client) client.release()
@@ -205,6 +254,82 @@ export async function updateOrderStatus(id: string, isPending: boolean): Promise
     }
   } catch (error) {
     console.error("Erro ao atualizar status do pedido:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+// Função para marcar pedidos como "em produção"
+export async function markOrdersInProduction(orderIds: string[]): Promise<Order[]> {
+  let client
+  try {
+    if (orderIds.length === 0) {
+      throw new Error("Nenhum pedido selecionado")
+    }
+
+    client = await pool.connect()
+    
+    // Verificar se todos os pedidos existem e não estão em produção
+    const checkResult = await client.query(
+      `SELECT id FROM orders 
+       WHERE id = ANY($1) AND (in_production = false OR in_production IS NULL)`,
+      [orderIds]
+    )
+    
+    if (checkResult.rows.length !== orderIds.length) {
+      throw new Error("Alguns pedidos não foram encontrados ou já estão em produção")
+    }
+
+    // Marcar pedidos como em produção
+    const result = await client.query(
+      `UPDATE orders 
+       SET in_production = true, in_production_at = NOW()
+       WHERE id = ANY($1) 
+       RETURNING *`,
+      [orderIds],
+    )
+    
+    return result.rows.map((row) => ({
+      ...row,
+      selected_images: row.selected_images,
+      updated_at: row.updated_at,
+      in_production_at: row.in_production_at,
+    }))
+  } catch (error) {
+    console.error("Erro ao marcar pedidos como em produção:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+// Função para finalizar pedidos (atualizar finalized_at)
+export async function finalizeOrders(orderIds: string[]): Promise<Order[]> {
+  let client
+  try {
+    if (orderIds.length === 0) {
+      throw new Error("Nenhum pedido selecionado")
+    }
+    client = await pool.connect()
+    // Só finaliza pedidos que NÃO estão finalizados
+    const checkResult = await client.query(
+      `SELECT id FROM orders WHERE id = ANY($1) AND finalized_at IS NULL`,
+      [orderIds]
+    )
+    if (checkResult.rows.length !== orderIds.length) {
+      throw new Error("Alguns pedidos já estão finalizados")
+    }
+    const result = await client.query(
+      `UPDATE orders SET finalized_at = NOW() WHERE id = ANY($1) AND finalized_at IS NULL RETURNING *`,
+      [orderIds]
+    )
+    return result.rows.map((row) => ({
+      ...row,
+      selected_images: row.selected_images,
+    }))
+  } catch (error) {
+    console.error("Erro ao finalizar pedidos:", error)
     throw error
   } finally {
     if (client) client.release()

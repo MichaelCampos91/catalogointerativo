@@ -66,9 +66,37 @@ export async function POST() {
         quantity_purchased INTEGER NOT NULL,
         selected_images JSONB NOT NULL,
         whatsapp_message TEXT,
+        "order" TEXT NOT NULL UNIQUE,
+        is_pending BOOLEAN DEFAULT true,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        in_production BOOLEAN DEFAULT false,
+        in_production_at TIMESTAMP WITH TIME ZONE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `)
+
+    // Migração: Adicionar campos in_production e in_production_at se não existirem
+    try {
+      await client.query(`
+        ALTER TABLE orders 
+        ADD COLUMN IF NOT EXISTS in_production BOOLEAN DEFAULT false,
+        ADD COLUMN IF NOT EXISTS in_production_at TIMESTAMP WITH TIME ZONE;
+      `)
+      console.log("API: Migração de campos in_production aplicada com sucesso")
+    } catch (error) {
+      console.log("API: Campos in_production já existem ou erro na migração:", error)
+    }
+
+    // Migração: Adicionar campo finalized_at se não existir
+    try {
+      await client.query(`
+        ALTER TABLE orders
+        ADD COLUMN IF NOT EXISTS finalized_at TIMESTAMP WITH TIME ZONE;
+      `)
+      console.log("API: Migração de campo finalized_at aplicada com sucesso")
+    } catch (error) {
+      console.log("API: Campo finalized_at já existe ou erro na migração:", error)
+    }
 
     // Inserir dados de exemplo apenas se não existirem
     const categoriesCount = await client.query("SELECT COUNT(*) FROM categories")
