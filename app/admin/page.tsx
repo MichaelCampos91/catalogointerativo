@@ -887,7 +887,7 @@ export default function AdminPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto overflow-y-auto md:max-h-[320px]">
+            <div className="overflow-x-auto overflow-y-auto md:max-h-[320px] max-h-[320px]">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -1008,7 +1008,7 @@ export default function AdminPage() {
                                   <ChevronDown className="h-4 w-4" />
                                 </Button>
                               </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-[180px] md:max-h-[300px] overflow-y-auto">
+                              <DropdownMenuContent align="end" className="w-[180px] md:max-h-[300px] max-h-[300px] overflow-y-auto">
                                 <div className="p-2 flex items-center justify-between border-b">
                                   <Button
                                     variant="ghost"
@@ -1155,7 +1155,7 @@ export default function AdminPage() {
 
       {/* Dialog de lista de pedidos em produção */}
       <Dialog open={listDialogOpen} onOpenChange={setListDialogOpen}>
-        <DialogContent className="max-w-4xl md:max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl md:max-h-[80vh] md:h-full max-h-[60vh] h-full overflow-y-auto" style={{ maxHeight: '60vh' }}>
           <DialogHeader>
             <DialogTitle>Lista de Pedidos em Produção</DialogTitle>
           </DialogHeader>
