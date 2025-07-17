@@ -671,162 +671,157 @@ export default function AdminPage() {
         </div>
 
         {/* Filtros */}
-        <Accordion type="single" collapsible defaultValue="filtros">
-          <AccordionItem value="filtros">
-            <AccordionTrigger>Filtros e Busca</AccordionTrigger>
-            <AccordionContent>
-              <div className="grid grid-cols-4 gap-4 mb-6">
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs text-gray-500 mb-2">Total de Pedidos</p>
-                        <p className="text-xl font-bold">{filteredOrders.length}</p>
-                      </div>
-                      <Package className="w-8 h-8 text-indigo-600" />
-                    </div>
-                  </CardContent>
-                </Card>
-                
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs text-gray-500 mb-2">Total de Clientes</p>
-                        <p className="text-xl font-bold">
-                          {new Set(filteredOrders.map(order => order.customer_name)).size}
-                        </p>
-                      </div>
-                      <User className="w-8 h-8 text-indigo-600" />
-                    </div>
-                  </CardContent>
-                </Card> 
+        <div>
+          <div className="grid grid-cols-4 gap-4 mb-6">
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-2">Total de Pedidos</p>
+                    <p className="text-xl font-bold">{filteredOrders.length}</p>
+                  </div>
+                  <Package className="w-8 h-8 text-indigo-600" />
+                </div>
+              </CardContent>
+            </Card>
+            
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-2">Total de Clientes</p>
+                    <p className="text-xl font-bold">
+                      {new Set(filteredOrders.map(order => order.customer_name)).size}
+                    </p>
+                  </div>
+                  <User className="w-8 h-8 text-indigo-600" />
+                </div>
+              </CardContent>
+            </Card> 
 
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs text-gray-500 mb-2">Criado em</p>
-                        <Input
-                          className="text-xs"
-                          id="date"
-                          type="date"
-                          value={dateFilter}
-                          onChange={(e) => setDateFilter(e.target.value)}
-                        />
-                      </div>
-                      <Button
-                        variant="outline"
-                        onClick={() => setDateFilter("")}
-                        className="mt-6"
-                      >
-                        Limpar
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs text-gray-500 mb-2">Arte Montada em</p>
-                        <Input
-                          className="text-xs"
-                          id="completionDate"
-                          type="date"
-                          value={completionDateFilter}
-                          onChange={(e) => setCompletionDateFilter(e.target.value)}
-                        />
-                      </div>
-                      <Button
-                        variant="outline"
-                        onClick={() => setCompletionDateFilter("")}
-                        className="mt-6"
-                      >
-                        Limpar
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-                
-              </div>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-2">Criado em</p>
+                    <Input
+                      className="text-xs"
+                      id="date"
+                      type="date"
+                      value={dateFilter}
+                      onChange={(e) => setDateFilter(e.target.value)}
+                    />
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => setDateFilter("")}
+                    className="mt-6"
+                  >
+                    Limpar
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-2">Arte Montada em</p>
+                    <Input
+                      className="text-xs"
+                      id="completionDate"
+                      type="date"
+                      value={completionDateFilter}
+                      onChange={(e) => setCompletionDateFilter(e.target.value)}
+                    />
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => setCompletionDateFilter("")}
+                    className="mt-6"
+                  >
+                    Limpar
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+            
+          </div>
 
-              <div className="grid grid-cols-4 gap-4 mb-6">
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs text-gray-500 mb-2">Em produção desde</p>
-                        <Input
-                          className="text-xs"
-                          id="productionDate"
-                          type="date"
-                          value={productionDateFilter}
-                          onChange={(e) => setProductionDateFilter(e.target.value)}
-                        />
-                      </div>
-                      <Button
-                        variant="outline"
-                        onClick={() => setProductionDateFilter("")}
-                        className="mt-6"
-                      >
-                        Limpar
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs text-gray-500 mb-2">Finalizado em</p>
-                        <Input
-                          className="text-xs"
-                          id="finalizedDate"
-                          type="date"
-                          value={finalizedDateFilter}
-                          onChange={(e) => setFinalizedDateFilter(e.target.value)}
-                        />
-                      </div>
-                      <Button
-                        variant="outline"
-                        onClick={() => setFinalizedDateFilter("")}
-                        className="mt-6"
-                      >
-                        Limpar
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-                {/* Campo de busca */}
-                <Card className="mb-6 col-span-2">
-                  <CardContent className="p-4">
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                      <Input
-                        type="text"
-                        placeholder="Buscar por nome do cliente ou número do pedido..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="pl-10 pr-4 py-2"
-                      />
-                      {searchQuery && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setSearchQuery("")}
-                          className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                        >
-                          ✕
-                        </Button>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            </AccordionContent>
-          </AccordionItem>
-        </Accordion>
+          <div className="grid grid-cols-4 gap-4 mb-6">
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-2">Em produção desde</p>
+                    <Input
+                      className="text-xs"
+                      id="productionDate"
+                      type="date"
+                      value={productionDateFilter}
+                      onChange={(e) => setProductionDateFilter(e.target.value)}
+                    />
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => setProductionDateFilter("")}
+                    className="mt-6"
+                  >
+                    Limpar
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-2">Finalizado em</p>
+                    <Input
+                      className="text-xs"
+                      id="finalizedDate"
+                      type="date"
+                      value={finalizedDateFilter}
+                      onChange={(e) => setFinalizedDateFilter(e.target.value)}
+                    />
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => setFinalizedDateFilter("")}
+                    className="mt-6"
+                  >
+                    Limpar
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+            {/* Campo de busca */}
+            <Card className="mb-6 col-span-2">
+              <CardContent className="p-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                  <Input
+                    type="text"
+                    placeholder="Buscar por nome do cliente ou número do pedido..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10 pr-4 py-2"
+                  />
+                  {searchQuery && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setSearchQuery("")}
+                      className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      ✕
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
 
         {/* Tabela de pedidos */}
         <Card>
