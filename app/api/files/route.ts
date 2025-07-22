@@ -40,6 +40,7 @@ export async function GET(request: Request) {
     const search = searchParams.get("search")?.toLowerCase() || ""
     const page = parseInt(searchParams.get("page") || "1", 10)
     const limit = parseInt(searchParams.get("limit") || "50", 10)
+    const all = searchParams.get("all") === "true"
 
     const targetPath = validatePath(dir)
     if (!fs.existsSync(targetPath)) {
@@ -57,7 +58,7 @@ export async function GET(request: Request) {
     // Paginação de categorias
     const totalCategories = categories.length
     const totalPages = Math.max(1, Math.ceil(totalCategories / limit))
-    const paginatedCategories = categories.slice((page - 1) * limit, page * limit)
+    const paginatedCategories = all ? categories : categories.slice((page - 1) * limit, page * limit)
 
     // Para cada categoria, listar todas as imagens (sem filtrar pelo termo de busca)
     const categoriesWithImages = paginatedCategories.map((cat) => {

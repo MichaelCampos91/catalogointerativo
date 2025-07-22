@@ -70,6 +70,7 @@ export default function AdminPage() {
   const [selectedOrdersForList, setSelectedOrdersForList] = useState<string[]>([])
   const [listDialogOpen, setListDialogOpen] = useState(false)
   const [finalizedDateFilter, setFinalizedDateFilter] = useState("")
+  const [selectedOrdersDataForList, setSelectedOrdersDataForList] = useState<Order[]>([])
 
   // Usar variável de ambiente pública para a senha (em produção, use autenticação adequada)
   const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || ""
@@ -398,23 +399,23 @@ export default function AdminPage() {
       return
     }
     try {
+      // Salvar os dados dos pedidos selecionados ANTES de atualizar o status
+      const selectedOrdersData = filteredOrders.filter(order => 
+        selectedOrdersForList.includes(order.id)
+      )
+      setSelectedOrdersDataForList(selectedOrdersData)
       // Verificar se todos os pedidos já estão finalizados (quando filtro é 'finalized')
       if (filterPending === "finalized") {
         const allFinalized = selectedOrdersForList.every(id => {
           const order = orders.find(o => o.id === id)
           return order && !!order.finalized_at
         })
-        
         if (allFinalized) {
-          // Se todos já estão finalizados, apenas exibir a lista
-          console.log("[handleGenerateList] Todos os pedidos já finalizados, exibindo lista...")
           setListDialogOpen(true)
           return
         }
       }
-      
       // Finalizar pedidos selecionados (apenas se não estiverem finalizados)
-      console.log("[handleGenerateList] IDs selecionados:", selectedOrdersForList)
       const response = await fetch("/api/orders", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -425,8 +426,6 @@ export default function AdminPage() {
         throw new Error(errorData.message || "Erro ao finalizar pedidos")
       }
       const updated = await response.json()
-      console.log("[handleGenerateList] Pedidos finalizados retornados:", updated)
-      // Atualizar lista local
       setOrders((prev) =>
         prev.map((order) => {
           const found = updated.find((u: Order) => u.id === order.id)
@@ -504,16 +503,9 @@ export default function AdminPage() {
   }
 
   const handleCopyReferences = () => {
-    const selectedOrdersData = filteredOrders.filter(order => 
-      selectedOrdersForList.includes(order.id)
-    )
-    
-    const references = selectedOrdersData.map(order => generateOrderReference(order)).join('\n')
+    // Usar o estado separado para garantir que os dados não mudem após atualização
+    const references = selectedOrdersDataForList.map(order => generateOrderReference(order)).join('\n')
     copyToClipboard(references)
-    toast.success({
-      title: "Referências copiadas",
-      description: `${selectedOrdersData.length} referência(s) copiada(s) para a área de transferência`,
-    })
   }
 
   // Nova função: checa se todos os pedidos selecionados estão em produção
@@ -1154,15 +1146,17 @@ export default function AdminPage() {
       </Dialog>
 
       {/* Dialog de lista de pedidos em produção */}
-      <Dialog open={listDialogOpen} onOpenChange={setListDialogOpen}>
+      <Dialog open={listDialogOpen} onOpenChange={(open) => {
+        setListDialogOpen(open)
+        if (!open) setSelectedOrdersDataForList([]) // Limpar ao fechar
+      }}>
         <DialogContent className="max-w-4xl md:max-h-[80vh] md:h-full max-h-[60vh] h-full overflow-y-auto" style={{ maxHeight: '60vh' }}>
           <DialogHeader>
             <DialogTitle>Lista de Pedidos em Produção</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-1 gap-4">
-              {orders
-                .filter(order => selectedOrdersForList.includes(order.id))
+              {selectedOrdersDataForList
                 .map((order) => (
                   <Card key={order.id}>
                     <CardContent className="p-4">
