@@ -469,6 +469,54 @@ export default function CatalogPage() {
                 Você está prestes a confirmar seu pedido com {selectedImages.length} imagens selecionadas.
               </DialogDescription>
             </DialogHeader>
+
+            {/* Miniaturas das imagens selecionadas */}
+            <div className="mb-4">
+              <h4 className="text-sm font-medium text-gray-700 mb-3 text-center">
+                Imagens Selecionadas ({selectedImages.length}/{customerData?.quantity})
+              </h4>
+              <div className="h-32 overflow-x-auto overflow-y-hidden">
+                <div className="flex gap-3 pb-2 min-w-full">
+                  {selectedImages.map((imageCode) => {
+                    const image = images.find(img => img.code === imageCode)
+                    if (!image) return null
+                    
+                    return (
+                      <div key={imageCode} className="relative flex-shrink-0">
+                        <div className="w-24 h-24 rounded-lg overflow-hidden border-2 border-gray-200 relative">
+                          <img
+                            src={image.image_url}
+                            alt={imageCode}
+                            className="w-full h-full object-cover"
+                            onContextMenu={(e) => e.preventDefault()}
+                            draggable="false"
+                            style={{ userSelect: 'none' }}
+                          />
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <img 
+                              src="/logo.png" 
+                              alt="Logo" 
+                              className="w-12 opacity-40"
+                            />
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleImageSelect(imageCode)}
+                          className="absolute -top-0 -right-2 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center transition-colors shadow-md"
+                          title="Remover imagem"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                        <p className="text-xs text-center mt-1 font-medium text-gray-600">{imageCode}</p>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+
             <div className="flex items-center space-x-2 mt-4">
               <Checkbox
                 id="aware"
@@ -479,13 +527,13 @@ export default function CatalogPage() {
                 htmlFor="aware"
                 className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
               >
-                Estou ciente que não poderei alterar minha seleção após a confirmação
+                Estou ciente que <strong>NÃO PODEREI ALTERAR</strong> os itens selecionados após a confirmação
               </label>
             </div>
             <div className="flex justify-end mt-6">
               <Button
                 onClick={handleConfirmOrder}
-                disabled={!isAware || loading}
+                disabled={!isAware || loading || !isSelectionComplete}
                 className="w-full"
               >
                 {loading ? (
