@@ -475,7 +475,7 @@ export default function CatalogPage() {
               <h4 className="text-sm font-medium text-gray-700 mb-3 text-center">
                 Imagens Selecionadas ({selectedImages.length}/{customerData?.quantity})
               </h4>
-              <div className="h-32 overflow-x-auto overflow-y-hidden">
+              <div className="h-32 overflow-x-auto overflow-y-hidden w-full max-w-md mx-auto">
                 <div className="flex gap-3 pb-2 min-w-full">
                   {selectedImages.map((imageCode) => {
                     const image = images.find(img => img.code === imageCode)
