@@ -22,6 +22,11 @@ export function CustomerInitializer({ onLoad }: { onLoad: (data: any) => void })
       onLoad(customerData)
       localStorage.setItem("customerData", JSON.stringify(customerData))
       localStorage.setItem("sessionLocked", "true")
+      
+      // Limpar seleções e dados do pedido anterior
+      localStorage.removeItem("selectedImages")
+      localStorage.removeItem("catalogTimer")
+      
       return
     }
 
