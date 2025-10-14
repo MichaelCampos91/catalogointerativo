@@ -568,103 +568,94 @@ export default function CatalogPage() {
 
         {/* Modal de Confirmação */}
         <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-          <DialogContent className="w-full max-w-[90vw] overflow-hidden p-2">
-            
-            <DialogHeader className="">
-              <div className="flex justify-center mb-4">
-                <AlertTriangle className="w-12 h-12 text-yellow-500" />
-              </div>
-              <DialogTitle className="text-center">Confirmar Pedido</DialogTitle>
-              <DialogDescription className="text-center">
-                Você está prestes a confirmar seu pedido com {selectedImages.length} imagens selecionadas.
-              </DialogDescription>
-            </DialogHeader>
+          <DialogContent className="w-[calc(100vw-2rem)] sm:w-auto sm:max-w-lg md:max-w-2xl lg:max-w-3xl xl:max-w-4xl max-w-full overflow-hidden p-0">
+            <div className="flex flex-col max-h-[80svh] sm:max-h-[85vh]">
+              <DialogHeader className="px-4 pt-4 pb-2">
+                <div className="flex justify-center mb-3">
+                  <AlertTriangle className="w-10 h-10 sm:w-12 sm:h-12 text-yellow-500" />
+                </div>
+                <DialogTitle className="text-center text-lg sm:text-xl">Confirmar Pedido</DialogTitle>
+                <DialogDescription className="text-center text-sm sm:text-base">
+                  Você está prestes a confirmar seu pedido com {selectedImages.length} imagens selecionadas.
+                </DialogDescription>
+              </DialogHeader>
 
-            {/* CONTAINER COM ROLAGEM INTERNA VERTICAL DO MODAL */}
-            <div className="space-y-4 overflow-y-hidden px-4 min-h-60">
-
-              <div className="">
+              {/* ÁREA ROLÁVEL */}
+              <div className="flex-1 overflow-hidden px-4 pb-4 space-y-4">
                 <h4 className="text-sm font-medium text-gray-700 text-center">
                   Imagens Selecionadas ({selectedImages.length}/{customerData?.quantity})
                 </h4>
-
-                {/* SOMENTE A FAIXA DE MINIATURAS ROLA HORIZONTALMENTE */}
-                <div className="w-full overflow-y-hidden overflow-x-scroll pt-4">
-                  <div className="inline-flex gap-3 pb-2 min-w-max">
-                    {selectedImages.map((imageCode) => {
-                      const cached = imagesCache[imageCode]
-                      const url = cached?.image_url
-                      return (
-                        <div key={imageCode} className="relative flex-shrink-0">
-                          <div className="w-24 h-24 rounded-lg overflow-hidden border-2 border-gray-200 relative bg-gray-100">
-                            {url ? (
-                              <img
-                                src={url}
-                                alt={imageCode}
-                                className="w-full h-full object-cover select-none"
-                                onContextMenu={(e) => e.preventDefault()}
-                                draggable={false}
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-500 p-2 text-center">
-                                {imageCode}
-                              </div>
-                            )}
-                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                              <img src="/logo.png" alt="Logo" className="w-12 opacity-40" />
+                {/* MINIATURAS (GRID COM ROLAGEM VERTICAL) */}
+                <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3 max-h-[50svh] overflow-y-auto px-4 pt-4 pb-40">
+                  {selectedImages.map((imageCode) => {
+                    const cached = imagesCache[imageCode]
+                    const url = cached?.image_url
+                    return (
+                      <div key={imageCode} className="relative">
+                        <div className="w-full aspect-square rounded-lg overflow-hidden border-2 border-gray-200 relative bg-gray-100">
+                          {url ? (
+                            <img
+                              src={url}
+                              alt={imageCode}
+                              className="w-full h-full object-cover select-none"
+                              onContextMenu={(e) => e.preventDefault()}
+                              draggable={false}
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-500 p-2 text-center">
+                              {imageCode}
                             </div>
+                          )}
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <img src="/logo.png" alt="Logo" className="w-10 sm:w-12 opacity-40" />
                           </div>
-
-                          {/* não deixe o botão ultrapassar o card */}
-                          <button
-                            onClick={() => handleImageSelect(imageCode)}
-                            className="absolute top-0 right-0 translate-x-1/2 -translate-y-1/2
-                                      w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full
-                                      flex items-center justify-center transition-colors shadow-md"
-                            title="Remover imagem"
-                          >
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-
-                          <p className="text-xs text-center mt-1 font-medium text-gray-600">{imageCode}</p>
                         </div>
-                      )
-                    })}
-                  </div>
+
+                        {/* Botão de remover não ultrapassa o card */}
+                        <button
+                          onClick={() => handleImageSelect(imageCode)}
+                          className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center transition-colors shadow-md"
+                          title="Remover imagem"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+
+                        <p className="text-[11px] sm:text-xs text-center mt-1 font-medium text-gray-600 truncate" title={imageCode}>{imageCode}</p>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
 
-              <div className="flex items-center space-x-2 px-4">
-                <Checkbox
-                  className="size-6"
-                  id="aware"
-                  checked={isAware}
-                  onCheckedChange={(checked) => setIsAware(checked as boolean)}
-                />
-                <label htmlFor="aware" className="text-sm font-medium leading-none">
-                  Estou ciente que <strong>NÃO PODEREI ALTERAR</strong> os itens selecionados após a confirmação
-                </label>
+              {/* FOOTER FIXO */}
+              <div className="sticky bottom-0 w-full bg-white border-t p-3 sm:p-4">
+                <div className="flex items-start sm:items-center gap-3 px-1 sm:px-2 mb-2">
+                  <Checkbox
+                    id="aware"
+                    checked={isAware}
+                    onCheckedChange={(checked) => setIsAware(checked as boolean)}
+                  />
+                  <label htmlFor="aware" className="text-sm sm:text-base font-medium leading-snug sm:leading-none">
+                    Estou ciente que <strong>NÃO PODEREI ALTERAR</strong> os itens selecionados após a confirmação
+                  </label>
+                </div>
+                <Button
+                  onClick={handleConfirmOrder}
+                  disabled={!isAware || loading || !isSelectionComplete}
+                  className="w-full"
+                >
+                  {loading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      Processando...
+                    </>
+                  ) : (
+                    "Confirmar Pedido"
+                  )}
+                </Button>
               </div>
-            </div>
-
-            {/* FOOTER FIXO DENTRO DO MODAL */}
-            <div className="mt-2">
-              <Button
-                onClick={handleConfirmOrder}
-                disabled={!isAware || loading || !isSelectionComplete}
-                className="w-full"
-              >
-                {loading ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Processando...
-                  </>
-                ) : (
-                  "Confirmar Pedido"
-                )}
-              </Button>
             </div>
           </DialogContent>
         </Dialog>
