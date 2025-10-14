@@ -568,16 +568,9 @@ export default function CatalogPage() {
 
         {/* Modal de Confirmação */}
         <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-          <DialogContent
-            className="
-              w-[92vw] sm:w-auto
-              max-w-[min(100vw-2rem,960px)]
-              max-h-[85dvh]
-              overflow-hidden              /* corta qualquer vazamento */
-              p-6
-            "
-          >
-            <DialogHeader>
+          <DialogContent className="w-full max-w-[90vw] overflow-hidden p-2">
+            
+            <DialogHeader className="">
               <div className="flex justify-center mb-4">
                 <AlertTriangle className="w-12 h-12 text-yellow-500" />
               </div>
@@ -588,17 +581,16 @@ export default function CatalogPage() {
             </DialogHeader>
 
             {/* CONTAINER COM ROLAGEM INTERNA VERTICAL DO MODAL */}
-            <div className="mt-2 space-y-4 overflow-y-auto pr-1 overflow-hidden"
-                style={{ maxHeight: 'calc(85dvh - 170px)' }}>
+            <div className="space-y-4 overflow-y-hidden px-4 min-h-60">
 
-              <div className="overflow-hidden">
-                <h4 className="text-sm font-medium text-gray-700 mb-3 text-center">
+              <div className="">
+                <h4 className="text-sm font-medium text-gray-700 text-center">
                   Imagens Selecionadas ({selectedImages.length}/{customerData?.quantity})
                 </h4>
 
                 {/* SOMENTE A FAIXA DE MINIATURAS ROLA HORIZONTALMENTE */}
-                <div className=" w-full overflow-y-hidden overflow-x-scroll scrollbar-hide pt-4">
-                  <div className="inline-flex gap-3 pb-4 min-w-max">
+                <div className="w-full overflow-y-hidden overflow-x-scroll pt-4">
+                  <div className="inline-flex gap-3 pb-2 min-w-max">
                     {selectedImages.map((imageCode) => {
                       const cached = imagesCache[imageCode]
                       const url = cached?.image_url
@@ -646,6 +638,7 @@ export default function CatalogPage() {
 
               <div className="flex items-center space-x-2 px-4">
                 <Checkbox
+                  className="size-6"
                   id="aware"
                   checked={isAware}
                   onCheckedChange={(checked) => setIsAware(checked as boolean)}
@@ -657,7 +650,7 @@ export default function CatalogPage() {
             </div>
 
             {/* FOOTER FIXO DENTRO DO MODAL */}
-            <div className="mt-6">
+            <div className="mt-2">
               <Button
                 onClick={handleConfirmOrder}
                 disabled={!isAware || loading || !isSelectionComplete}
@@ -676,8 +669,6 @@ export default function CatalogPage() {
           </DialogContent>
         </Dialog>
 
-
-    
 
         {/* Botão de WhatsApp */}
         {customerData && selectedImages.length > 0 && (
