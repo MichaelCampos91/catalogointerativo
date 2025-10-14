@@ -8,6 +8,36 @@ const config: Config = {
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
     "*.{js,ts,jsx,tsx,mdx}"
   ],
+  safelist: [
+    // Classes críticas do modal que podem ser purgadas
+    'w-[95vw]',
+    'max-h-[80vh]',
+    'max-h-[85vh]',
+    'max-h-[50vh]',
+    'pb-32',
+    '-top-2',
+    '-right-2',
+    'bg-red-500',
+    'hover:bg-red-600',
+    'bg-black/80',
+    'text-[10px]',
+    'text-[11px]',
+    'w-6',
+    'h-6',
+    'w-10',
+    'h-10',
+    'w-12',
+    'h-12',
+    'w-24',
+    'w-3',
+    'h-3',
+    'w-4',
+    'h-4',
+    'w-5',
+    'h-5',
+    'w-8',
+    'h-8'
+  ],
   theme: {
   	extend: {
   		colors: {
