@@ -592,8 +592,9 @@ export default function CatalogPage() {
                     const cached = imagesCache[imageCode]
                     const url = cached?.image_url
                     return (
-                      <div key={imageCode} className="relative">
-                        <div className="w-full aspect-square rounded-lg overflow-hidden border-2 border-gray-200 relative bg-gray-100" style={{ maxWidth: '80px' }}>
+                      <div key={imageCode} className="relative" style={{ position: 'relative' }}>
+                        <div className="w-full aspect-square rounded-lg overflow-hidden border-2 border-gray-200 relative bg-gray-100" 
+                        style={{ maxWidth: '80px', position: 'relative' }}>
                           {url ? (
                             <img
                               src={url}
@@ -603,7 +604,7 @@ export default function CatalogPage() {
                               draggable={false}
                             />
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-500 p-2 text-center">
+                            <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-500 p-2 text-center text-xs" style={{ fontSize: '10px' }}>
                               {imageCode}
                             </div>
                           )}
@@ -617,7 +618,7 @@ export default function CatalogPage() {
                           onClick={() => handleImageSelect(imageCode)}
                           className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center transition-colors shadow-md"
                           title="Remover imagem"
-                          style={{ maxWidth: '24px', position: 'absolute', top: '-10px', right: '-10px', backgroundColor: 'red' }}
+                          style={{ maxWidth: '24px', position: 'absolute', top: '-10px', right: '15px', backgroundColor: 'red' }}
                         >
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
