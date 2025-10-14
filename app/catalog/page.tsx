@@ -57,12 +57,28 @@ export default function CatalogPage() {
   })
   const [loadingMore, setLoadingMore] = useState(false)
   const [timeLeft, setTimeLeft] = useState<number>(24 * 60 * 60) // 24 horas em segundos
+  const [imagesCache, setImagesCache] = useState<Record<string, { code: string; image_url: string; category_id: string }>>({})
   const router = useRouter()
 
   useEffect(() => {
     const data = localStorage.getItem("customerData")
     if (data) {
-      setCustomerData(JSON.parse(data))
+      const parsed = JSON.parse(data)
+      setCustomerData(parsed)
+      // Limpar caches de pedidos diferentes e carregar cache do pedido atual
+      const currentCacheKey = `imageCache:${parsed.orderNumber}`
+      const keysToRemove: string[] = []
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i)
+        if (k && k.startsWith("imageCache:") && k !== currentCacheKey) {
+          keysToRemove.push(k)
+        }
+      }
+      keysToRemove.forEach((k) => localStorage.removeItem(k))
+      const cached = localStorage.getItem(currentCacheKey)
+      if (cached) {
+        try { setImagesCache(JSON.parse(cached)) } catch {}
+      }
     }
   
     // Carregar itens selecionados do localStorage
@@ -111,6 +127,66 @@ export default function CatalogPage() {
       localStorage.removeItem("selectedImages")
     }
   }, [selectedImages, customerData])
+
+  // Prefetch de itens ausentes no cache ao abrir o modal
+  useEffect(() => {
+    const prefetchMissing = async () => {
+      if (!showConfirmDialog || !customerData) return
+      const missing = selectedImages.filter((code) => !imagesCache[code])
+      if (missing.length === 0) return
+      try {
+        const res = await fetch(`/api/files?all=true&limit=9999&page=1`)
+        if (!res.ok) return
+        const j = await res.json()
+        const fetched: Record<string, { code: string; image_url: string; category_id: string }> = {}
+        // Tentar resolver pelos arrays "images" (diretório atual)
+        if (Array.isArray(j.images)) {
+          for (const img of j.images) {
+            if (missing.includes(img.code)) {
+              fetched[img.code] = { code: img.code, image_url: img.url, category_id: img.category || '' }
+            }
+          }
+        }
+        // Tentar resolver pelos arrays aninhados em categorias
+        if (Array.isArray(j.categories)) {
+          for (const cat of j.categories) {
+            if (Array.isArray(cat.images)) {
+              for (const img of cat.images) {
+                if (missing.includes(img.code)) {
+                  fetched[img.code] = { code: img.code, image_url: img.url, category_id: cat.id || cat.name }
+                }
+              }
+            }
+          }
+        }
+        if (Object.keys(fetched).length > 0) {
+          setImagesCache((prev) => {
+            const merged = { ...prev, ...fetched }
+            const codes = Object.keys(merged)
+            if (codes.length > 200) {
+              const prioritized = new Set<string>(selectedImages)
+              const result: Record<string, { code: string; image_url: string; category_id: string }> = {}
+              for (const code of codes) {
+                if (prioritized.has(code)) result[code] = merged[code]
+              }
+              for (const code of codes) {
+                if (!result[code]) {
+                  result[code] = merged[code]
+                  if (Object.keys(result).length >= 200) break
+                }
+              }
+              try { localStorage.setItem(`imageCache:${customerData.orderNumber}`, JSON.stringify(result)) } catch {}
+              return result
+            }
+            try { localStorage.setItem(`imageCache:${customerData.orderNumber}`, JSON.stringify(merged)) } catch {}
+            return merged
+          })
+        }
+      } catch {}
+    }
+    prefetchMissing()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showConfirmDialog])
 
   // Função para formatar o tempo restante
   const formatTimeLeft = (seconds: number) => {
@@ -173,6 +249,35 @@ export default function CatalogPage() {
         setImages((prev) => [...prev, ...newImages])
       }
       setPagination(data.pagination)
+      // Atualizar cache de imagens vistas e persistir por pedido (cap 200)
+      if (customerData) {
+        setImagesCache((prev) => {
+          const updated: Record<string, { code: string; image_url: string; category_id: string }> = { ...prev }
+          for (const img of newImages) {
+            updated[img.code] = { code: img.code, image_url: img.image_url, category_id: img.category_id }
+          }
+          const codes = Object.keys(updated)
+          if (codes.length > 200) {
+            const prioritized = new Set<string>(selectedImages)
+            const result: Record<string, { code: string; image_url: string; category_id: string }> = {}
+            for (const code of codes) {
+              if (prioritized.has(code)) {
+                result[code] = updated[code]
+              }
+            }
+            for (const code of codes) {
+              if (!result[code]) {
+                result[code] = updated[code]
+                if (Object.keys(result).length >= 200) break
+              }
+            }
+            try { localStorage.setItem(`imageCache:${customerData.orderNumber}`, JSON.stringify(result)) } catch {}
+            return result
+          }
+          try { localStorage.setItem(`imageCache:${customerData.orderNumber}`, JSON.stringify(updated)) } catch {}
+          return updated
+        })
+      }
     } catch (error) {
       console.error("Erro ao carregar dados:", error)
       setError(error instanceof Error ? error.message : "Erro desconhecido ao carregar dados")
@@ -257,11 +362,15 @@ export default function CatalogPage() {
       localStorage.removeItem("sessionLocked")
       localStorage.removeItem("selectedImages")
       localStorage.removeItem("catalogTimer")
-
+      if (customerData?.orderNumber) {
+        localStorage.removeItem(`imageCache:${customerData.orderNumber}`)
+      }
+ 
       // Limpar estado local
       setCustomerData(null)
       setSelectedImages([])
       setTimeLeft(0)
+      setImagesCache({})
 
       toast.success("Seu pedido foi confirmado! Conheça outros produtos em nossa loja...")
       
@@ -459,7 +568,15 @@ export default function CatalogPage() {
 
         {/* Modal de Confirmação */}
         <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent
+            className="
+              w-[92vw] sm:w-auto
+              max-w-[min(100vw-2rem,960px)]
+              max-h-[85dvh]
+              overflow-hidden              /* corta qualquer vazamento */
+              p-6
+            "
+          >
             <DialogHeader>
               <div className="flex justify-center mb-4">
                 <AlertTriangle className="w-12 h-12 text-yellow-500" />
@@ -470,67 +587,77 @@ export default function CatalogPage() {
               </DialogDescription>
             </DialogHeader>
 
-            {/* Miniaturas das imagens selecionadas */}
-            <div className="mb-4">
-              <h4 className="text-sm font-medium text-gray-700 mb-3 text-center">
-                Imagens Selecionadas ({selectedImages.length}/{customerData?.quantity})
-              </h4>
-              <div className="h-32 overflow-x-auto overflow-y-hidden w-full max-w-md mx-auto">
-                <div className="flex gap-3 pb-2 min-w-full">
-                  {selectedImages.map((imageCode) => {
-                    const image = images.find(img => img.code === imageCode)
-                    if (!image) return null
-                    
-                    return (
-                      <div key={imageCode} className="relative flex-shrink-0">
-                        <div className="w-24 h-24 rounded-lg overflow-hidden border-2 border-gray-200 relative">
-                          <img
-                            src={image.image_url}
-                            alt={imageCode}
-                            className="w-full h-full object-cover"
-                            onContextMenu={(e) => e.preventDefault()}
-                            draggable="false"
-                            style={{ userSelect: 'none' }}
-                          />
-                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                            <img 
-                              src="/logo.png" 
-                              alt="Logo" 
-                              className="w-12 opacity-40"
-                            />
+            {/* CONTAINER COM ROLAGEM INTERNA VERTICAL DO MODAL */}
+            <div className="mt-2 space-y-4 overflow-y-auto pr-1 overflow-hidden"
+                style={{ maxHeight: 'calc(85dvh - 170px)' }}>
+
+              <div className="overflow-hidden">
+                <h4 className="text-sm font-medium text-gray-700 mb-3 text-center">
+                  Imagens Selecionadas ({selectedImages.length}/{customerData?.quantity})
+                </h4>
+
+                {/* SOMENTE A FAIXA DE MINIATURAS ROLA HORIZONTALMENTE */}
+                <div className=" w-full overflow-y-hidden overflow-x-scroll scrollbar-hide pt-4">
+                  <div className="inline-flex gap-3 pb-4 min-w-max">
+                    {selectedImages.map((imageCode) => {
+                      const cached = imagesCache[imageCode]
+                      const url = cached?.image_url
+                      return (
+                        <div key={imageCode} className="relative flex-shrink-0">
+                          <div className="w-24 h-24 rounded-lg overflow-hidden border-2 border-gray-200 relative bg-gray-100">
+                            {url ? (
+                              <img
+                                src={url}
+                                alt={imageCode}
+                                className="w-full h-full object-cover select-none"
+                                onContextMenu={(e) => e.preventDefault()}
+                                draggable={false}
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-500 p-2 text-center">
+                                {imageCode}
+                              </div>
+                            )}
+                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                              <img src="/logo.png" alt="Logo" className="w-12 opacity-40" />
+                            </div>
                           </div>
+
+                          {/* não deixe o botão ultrapassar o card */}
+                          <button
+                            onClick={() => handleImageSelect(imageCode)}
+                            className="absolute top-0 right-0 translate-x-1/2 -translate-y-1/2
+                                      w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full
+                                      flex items-center justify-center transition-colors shadow-md"
+                            title="Remover imagem"
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+
+                          <p className="text-xs text-center mt-1 font-medium text-gray-600">{imageCode}</p>
                         </div>
-                        <button
-                          onClick={() => handleImageSelect(imageCode)}
-                          className="absolute -top-0 -right-2 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center transition-colors shadow-md"
-                          title="Remover imagem"
-                        >
-                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                        <p className="text-xs text-center mt-1 font-medium text-gray-600">{imageCode}</p>
-                      </div>
-                    )
-                  })}
+                      )
+                    })}
+                  </div>
                 </div>
+              </div>
+
+              <div className="flex items-center space-x-2 px-4">
+                <Checkbox
+                  id="aware"
+                  checked={isAware}
+                  onCheckedChange={(checked) => setIsAware(checked as boolean)}
+                />
+                <label htmlFor="aware" className="text-sm font-medium leading-none">
+                  Estou ciente que <strong>NÃO PODEREI ALTERAR</strong> os itens selecionados após a confirmação
+                </label>
               </div>
             </div>
 
-            <div className="flex items-center space-x-2 mt-4">
-              <Checkbox
-                id="aware"
-                checked={isAware}
-                onCheckedChange={(checked) => setIsAware(checked as boolean)}
-              />
-              <label
-                htmlFor="aware"
-                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-              >
-                Estou ciente que <strong>NÃO PODEREI ALTERAR</strong> os itens selecionados após a confirmação
-              </label>
-            </div>
-            <div className="flex justify-end mt-6">
+            {/* FOOTER FIXO DENTRO DO MODAL */}
+            <div className="mt-6">
               <Button
                 onClick={handleConfirmOrder}
                 disabled={!isAware || loading || !isSelectionComplete}
@@ -548,6 +675,9 @@ export default function CatalogPage() {
             </div>
           </DialogContent>
         </Dialog>
+
+
+    
 
         {/* Botão de WhatsApp */}
         {customerData && selectedImages.length > 0 && (
