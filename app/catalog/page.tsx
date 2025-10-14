@@ -568,33 +568,162 @@ export default function CatalogPage() {
 
         {/* Modal de Confirmação */}
         <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-          <DialogContent className="w-[calc(100vw-2rem)] sm:w-auto sm:max-w-lg md:max-w-2xl lg:max-w-3xl xl:max-w-4xl max-w-full overflow-hidden p-0"
-           style={{ maxHeight: '85vh', maxWidth: '600px' }}>
-            <div className="flex flex-col max-h-[80svh] sm:max-h-[85vh]">
-              <DialogHeader className="px-4 pt-4 pb-2">
-                <div className="flex justify-center mb-3">
-                  <AlertTriangle className="w-10 h-10 sm:w-12 sm:h-12 text-yellow-500" />
+          <DialogContent 
+            className="w-[calc(100vw-2rem)] sm:w-auto sm:max-w-lg md:max-w-2xl lg:max-w-3xl xl:max-w-4xl max-w-full overflow-hidden p-0"
+            style={{ 
+              maxHeight: '85vh', 
+              maxWidth: '600px',
+              width: 'calc(100vw - 2rem)',
+              margin: '1rem',
+              position: 'relative',
+              display: 'flex',
+              flexDirection: 'column',
+              backgroundColor: 'white',
+              borderRadius: '0.5rem',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              overflow: 'hidden'
+            }}
+          >
+            <div 
+              className="flex flex-col max-h-[80svh] sm:max-h-[85vh]"
+              style={{ 
+                display: 'flex', 
+                flexDirection: 'column', 
+                maxHeight: '80vh',
+                height: '100%'
+              }}
+            >
+              <DialogHeader 
+                className="px-4 pt-4 pb-2"
+                style={{ 
+                  padding: '1rem 1rem 0.5rem 1rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center'
+                }}
+              >
+                <div 
+                  className="flex justify-center mb-3"
+                  style={{ 
+                    display: 'flex', 
+                    justifyContent: 'center', 
+                    marginBottom: '0.75rem' 
+                  }}
+                >
+                  <AlertTriangle 
+                    className="w-10 h-10 sm:w-12 sm:h-12 text-yellow-500" 
+                    style={{ 
+                      width: '2.5rem', 
+                      height: '2.5rem', 
+                      color: '#eab308' 
+                    }}
+                  />
                 </div>
-                <DialogTitle className="text-center text-lg sm:text-xl">Confirmar Pedido</DialogTitle>
-                <DialogDescription className="text-center text-sm sm:text-base">
+                <DialogTitle 
+                  className="text-center text-lg sm:text-xl"
+                  style={{ 
+                    textAlign: 'center', 
+                    fontSize: '1.25rem', 
+                    fontWeight: '600',
+                    margin: '0 0 0.5rem 0'
+                  }}
+                >
+                  Confirmar Pedido
+                </DialogTitle>
+                <DialogDescription 
+                  className="text-center text-sm sm:text-base"
+                  style={{ 
+                    textAlign: 'center', 
+                    fontSize: '0.875rem', 
+                    color: '#6b7280',
+                    margin: '0'
+                  }}
+                >
                   Você está prestes a confirmar seu pedido com {selectedImages.length} imagens selecionadas.
                 </DialogDescription>
               </DialogHeader>
 
               {/* ÁREA ROLÁVEL */}
-              <div className="flex-1 overflow-hidden px-4 pb-4 space-y-4">
-                <h4 className="text-sm font-medium text-gray-700 text-center">
+              <div 
+                className="flex-1 overflow-hidden px-4 pb-4 space-y-4"
+                style={{ 
+                  flex: '1',
+                  overflow: 'hidden',
+                  padding: '0 1rem 1rem 1rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '1rem'
+                }}
+              >
+                <h4 
+                  className="text-sm font-medium text-gray-700 text-center"
+                  style={{ 
+                    fontSize: '0.875rem', 
+                    fontWeight: '500', 
+                    color: '#374151', 
+                    textAlign: 'center',
+                    margin: '0'
+                  }}
+                >
                   Imagens Selecionadas ({selectedImages.length}/{customerData?.quantity})
                 </h4>
                 {/* MINIATURAS (GRID COM ROLAGEM VERTICAL) */}
-                <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3 max-h-[50svh] overflow-y-auto px-4 pt-4 pb-40" style={{ maxHeight: '50svh' }}>
+                <div 
+                  className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3 max-h-[50svh] overflow-y-auto px-4 pt-4 pb-40" 
+                  style={{ 
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gap: '0.75rem',
+                    maxHeight: '50vh',
+                    overflowY: 'auto',
+                    padding: '1rem',
+                    paddingBottom: '10rem'
+                  }}
+                  ref={(el) => {
+                    if (el) {
+                      const updateGrid = () => {
+                        const width = window.innerWidth
+                        if (width >= 1024) {
+                          el.style.gridTemplateColumns = 'repeat(6, 1fr)'
+                        } else if (width >= 640) {
+                          el.style.gridTemplateColumns = 'repeat(4, 1fr)'
+                        } else {
+                          el.style.gridTemplateColumns = 'repeat(3, 1fr)'
+                        }
+                      }
+                      updateGrid()
+                      window.addEventListener('resize', updateGrid)
+                      return () => window.removeEventListener('resize', updateGrid)
+                    }
+                  }}
+                >
                   {selectedImages.map((imageCode) => {
                     const cached = imagesCache[imageCode]
                     const url = cached?.image_url
                     return (
-                      <div key={imageCode} className="relative" style={{ position: 'relative' }}>
-                        <div className="w-full aspect-square rounded-lg overflow-hidden border-2 border-gray-200 relative bg-gray-100" 
-                        style={{ maxWidth: '80px', position: 'relative' }}>
+                      <div 
+                        key={imageCode} 
+                        className="relative" 
+                        style={{ 
+                          position: 'relative',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center'
+                        }}
+                      >
+                        <div 
+                          className="w-full aspect-square rounded-lg overflow-hidden border-2 border-gray-200 relative bg-gray-100" 
+                          style={{ 
+                            width: '100%',
+                            aspectRatio: '1 / 1',
+                            borderRadius: '0.5rem',
+                            overflow: 'hidden',
+                            border: '2px solid #e5e7eb',
+                            position: 'relative',
+                            backgroundColor: '#f3f4f6',
+                            maxWidth: '80px'
+                          }}
+                        >
                           {url ? (
                             <img
                               src={url}
@@ -602,14 +731,54 @@ export default function CatalogPage() {
                               className="w-full h-full object-cover select-none"
                               onContextMenu={(e) => e.preventDefault()}
                               draggable={false}
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'cover',
+                                userSelect: 'none'
+                              }}
                             />
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-500 p-2 text-center text-xs" style={{ fontSize: '10px' }}>
+                            <div 
+                              className="w-full h-full flex items-center justify-center text-[10px] text-gray-500 p-2 text-center text-xs" 
+                              style={{ 
+                                width: '100%',
+                                height: '100%',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '10px',
+                                color: '#6b7280',
+                                padding: '0.5rem',
+                                textAlign: 'center'
+                              }}
+                            >
                               {imageCode}
                             </div>
                           )}
-                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                            <img src="/logo.png" alt="Logo" className="w-10 sm:w-12 opacity-40" />
+                          <div 
+                            className="absolute inset-0 flex items-center justify-center pointer-events-none"
+                            style={{
+                              position: 'absolute',
+                              top: '0',
+                              left: '0',
+                              right: '0',
+                              bottom: '0',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              pointerEvents: 'none'
+                            }}
+                          >
+                            <img 
+                              src="/logo.png" 
+                              alt="Logo" 
+                              className="w-10 sm:w-12 opacity-40" 
+                              style={{
+                                width: '2.5rem',
+                                opacity: '0.4'
+                              }}
+                            />
                           </div>
                         </div>
 
@@ -618,14 +787,61 @@ export default function CatalogPage() {
                           onClick={() => handleImageSelect(imageCode)}
                           className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center transition-colors shadow-md"
                           title="Remover imagem"
-                          style={{ maxWidth: '24px', position: 'absolute', top: '-10px', right: '15px', backgroundColor: 'red' }}
+                          style={{ 
+                            position: 'absolute',
+                            top: '-0.5rem',
+                            right: '-0.5rem',
+                            width: '1.5rem',
+                            height: '1.5rem',
+                            backgroundColor: '#ef4444',
+                            color: 'white',
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            border: 'none',
+                            cursor: 'pointer',
+                            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                            transition: 'background-color 0.2s'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = '#dc2626'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = '#ef4444'
+                          }}
                         >
-                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg 
+                            className="w-3 h-3" 
+                            fill="none" 
+                            stroke="currentColor" 
+                            viewBox="0 0 24 24"
+                            style={{
+                              width: '0.75rem',
+                              height: '0.75rem'
+                            }}
+                          >
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                           </svg>
                         </button>
 
-                        <p className="text-[11px] sm:text-xs text-center mt-1 font-medium text-gray-600 truncate" title={imageCode}>{imageCode}</p>
+                        <p 
+                          className="text-[11px] sm:text-xs text-center mt-1 font-medium text-gray-600 truncate" 
+                          title={imageCode}
+                          style={{
+                            fontSize: '11px',
+                            textAlign: 'center',
+                            marginTop: '0.25rem',
+                            fontWeight: '500',
+                            color: '#4b5563',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            width: '100%'
+                          }}
+                        >
+                          {imageCode}
+                        </p>
                       </div>
                     )
                   })}
@@ -633,14 +849,51 @@ export default function CatalogPage() {
               </div>
 
               {/* FOOTER FIXO */}
-              <div className="sticky bottom-0 w-full bg-white border-t p-3 sm:p-4">
-                <div className="flex items-start sm:items-center gap-3 px-1 sm:px-2 mb-2">
+              <div 
+                className="sticky bottom-0 w-full bg-white border-t p-3 sm:p-4"
+                style={{
+                  position: 'sticky',
+                  bottom: '0',
+                  width: '100%',
+                  backgroundColor: 'white',
+                  borderTop: '1px solid #e5e7eb',
+                  padding: '0.75rem 1rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.5rem'
+                }}
+              >
+                <div 
+                  className="flex items-start sm:items-center gap-3 px-1 sm:px-2 mb-2"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.75rem',
+                    padding: '0 0.5rem',
+                    marginBottom: '0.5rem'
+                  }}
+                >
                   <Checkbox
                     id="aware"
                     checked={isAware}
                     onCheckedChange={(checked) => setIsAware(checked as boolean)}
+                    style={{
+                      width: '1.25rem',
+                      height: '1.25rem',
+                      marginTop: '0.125rem'
+                    }}
                   />
-                  <label htmlFor="aware" className="text-sm sm:text-base font-medium leading-snug sm:leading-none">
+                  <label 
+                    htmlFor="aware" 
+                    className="text-sm sm:text-base font-medium leading-snug sm:leading-none"
+                    style={{
+                      fontSize: '0.875rem',
+                      fontWeight: '500',
+                      lineHeight: '1.375',
+                      cursor: 'pointer',
+                      flex: '1'
+                    }}
+                  >
                     Estou ciente que <strong>NÃO PODEREI ALTERAR</strong> os itens selecionados após a confirmação
                   </label>
                 </div>
@@ -648,10 +901,37 @@ export default function CatalogPage() {
                   onClick={handleConfirmOrder}
                   disabled={!isAware || loading || !isSelectionComplete}
                   className="w-full"
+                  style={{
+                    width: '100%',
+                    backgroundColor: !isAware || loading || !isSelectionComplete ? '#9ca3af' : '#8b5cf6',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '0.375rem',
+                    padding: '0.75rem 1rem',
+                    fontSize: '0.875rem',
+                    fontWeight: '500',
+                    cursor: !isAware || loading || !isSelectionComplete ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                    transition: 'background-color 0.2s'
+                  }}
                 >
                   {loading ? (
                     <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      <div 
+                        className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"
+                        style={{
+                          width: '1rem',
+                          height: '1rem',
+                          border: '2px solid transparent',
+                          borderBottomColor: 'white',
+                          borderRadius: '50%',
+                          animation: 'spin 1s linear infinite',
+                          marginRight: '0.5rem'
+                        }}
+                      ></div>
                       Processando...
                     </>
                   ) : (
