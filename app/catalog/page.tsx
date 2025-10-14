@@ -568,7 +568,8 @@ export default function CatalogPage() {
 
         {/* Modal de Confirmação */}
         <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-          <DialogContent className="w-[calc(100vw-2rem)] sm:w-auto sm:max-w-lg md:max-w-2xl lg:max-w-3xl xl:max-w-4xl max-w-full overflow-hidden p-0">
+          <DialogContent className="w-[calc(100vw-2rem)] sm:w-auto sm:max-w-lg md:max-w-2xl lg:max-w-3xl xl:max-w-4xl max-w-full overflow-hidden p-0"
+           style={{ maxHeight: '85vh', maxWidth: '600px' }}>
             <div className="flex flex-col max-h-[80svh] sm:max-h-[85vh]">
               <DialogHeader className="px-4 pt-4 pb-2">
                 <div className="flex justify-center mb-3">
@@ -586,13 +587,13 @@ export default function CatalogPage() {
                   Imagens Selecionadas ({selectedImages.length}/{customerData?.quantity})
                 </h4>
                 {/* MINIATURAS (GRID COM ROLAGEM VERTICAL) */}
-                <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3 max-h-[50svh] overflow-y-auto px-4 pt-4 pb-40">
+                <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3 max-h-[50svh] overflow-y-auto px-4 pt-4 pb-40" style={{ maxHeight: '50svh' }}>
                   {selectedImages.map((imageCode) => {
                     const cached = imagesCache[imageCode]
                     const url = cached?.image_url
                     return (
                       <div key={imageCode} className="relative">
-                        <div className="w-full aspect-square rounded-lg overflow-hidden border-2 border-gray-200 relative bg-gray-100">
+                        <div className="w-full aspect-square rounded-lg overflow-hidden border-2 border-gray-200 relative bg-gray-100" style={{ maxWidth: '80px' }}>
                           {url ? (
                             <img
                               src={url}
@@ -616,6 +617,7 @@ export default function CatalogPage() {
                           onClick={() => handleImageSelect(imageCode)}
                           className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center transition-colors shadow-md"
                           title="Remover imagem"
+                          style={{ maxWidth: '24px', position: 'absolute', top: '-10px', right: '-10px', backgroundColor: 'red' }}
                         >
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
