@@ -6,12 +6,31 @@ import { Storage } from '@google-cloud/storage'
 
 // Função para inicializar o Google Cloud Storage
 function getStorage() {
+  // Detectar se estamos no Cloud Run (verificar variáveis específicas do Cloud Run)
+  const isCloudRun = process.env.K_SERVICE || process.env.K_REVISION || process.env.PORT
+  
+  // No Cloud Run, use Application Default Credentials
+  if (isCloudRun) {
+    return new Storage({
+      projectId: process.env.GCS_PROJECT_ID,
+      // ADC será usado automaticamente no Cloud Run
+    })
+  }
+  
+  // Para desenvolvimento local, use credenciais do .env se disponíveis
+  if (process.env.GCS_CLIENT_EMAIL && process.env.GCS_PRIVATE_KEY && process.env.GCS_PRIVATE_KEY.trim() !== '') {
+    return new Storage({
+      projectId: process.env.GCS_PROJECT_ID,
+      credentials: {
+        client_email: process.env.GCS_CLIENT_EMAIL,
+        private_key: process.env.GCS_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      },
+    })
+  }
+  
+  // Fallback para ADC local (se gcloud auth application-default login foi executado)
   return new Storage({
     projectId: process.env.GCS_PROJECT_ID,
-    credentials: {
-      client_email: process.env.GCS_CLIENT_EMAIL,
-      private_key: process.env.GCS_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-    },
   })
 }
 
@@ -60,6 +79,13 @@ export async function GET(request: Request) {
     if (!bucketName) {
       throw new Error("GCS_BUCKET_NAME não configurado")
     }
+    
+    // Debug logs para verificar configuração
+    const isCloudRun = process.env.K_SERVICE || process.env.K_REVISION || process.env.PORT
+    console.log('🔍 Environment:', process.env.NODE_ENV || 'development')
+    console.log('🔍 Is Cloud Run:', !!isCloudRun)
+    console.log('🔍 Bucket Name:', bucketName)
+    console.log('🔍 Project ID:', process.env.GCS_PROJECT_ID)
     
     const bucket = storage.bucket(bucketName)
     
