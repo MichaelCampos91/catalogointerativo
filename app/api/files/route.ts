@@ -2,8 +2,20 @@ import { NextResponse } from "next/server"
 import fs from "fs"
 import path from "path"
 import { writeFile } from "fs/promises"
+import { Storage } from '@google-cloud/storage'
 
-// Função auxiliar para validar o caminho
+// Função para inicializar o Google Cloud Storage
+function getStorage() {
+  return new Storage({
+    projectId: process.env.GCS_PROJECT_ID,
+    credentials: {
+      client_email: process.env.GCS_CLIENT_EMAIL,
+      private_key: process.env.GCS_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    },
+  })
+}
+
+// Função auxiliar para validar o caminho (mantida para compatibilidade com POST/DELETE)
 function validatePath(dir: string) {
   const basePath = path.join(process.cwd(), "public", "files")
   // Se o diretório for vazio, retornamos o basePath
@@ -42,14 +54,57 @@ export async function GET(request: Request) {
     const limit = parseInt(searchParams.get("limit") || "50", 10)
     const all = searchParams.get("all") === "true"
 
-    const targetPath = validatePath(dir)
-    if (!fs.existsSync(targetPath)) {
-      return NextResponse.json({ error: "Diretório não encontrado" }, { status: 404 })
+    // Inicializar GCS
+    const storage = getStorage()
+    const bucketName = process.env.GCS_BUCKET_NAME
+    if (!bucketName) {
+      throw new Error("GCS_BUCKET_NAME não configurado")
     }
+    
+    const bucket = storage.bucket(bucketName)
+    
+    // Construir prefixo baseado no diretório
+    const basePrefix = "public/files/"
+    const searchPrefix = dir ? `${basePrefix}${dir}/` : basePrefix
 
-    // Listar categorias (pastas)
-    const items = fs.readdirSync(targetPath, { withFileTypes: true })
-    let categories = items.filter((item) => item.isDirectory())
+    // Listar arquivos do bucket
+    const [files] = await bucket.getFiles({ prefix: searchPrefix })
+    
+    // Agrupar arquivos por categoria (pasta)
+    const categoriesMap = new Map<string, any[]>()
+    
+    files.forEach((file) => {
+      // Pular se não for uma imagem
+      if (!/\.(jpg|jpeg|png|webp)$/i.test(file.name)) return
+      
+      // Extrair categoria do caminho: public/files/CATEGORIA/imagem.jpg
+      const pathParts = file.name.split('/')
+      if (pathParts.length < 3) return // Deve ter pelo menos public/files/categoria/imagem
+      
+      const category = pathParts[2] // public/files/CATEGORIA/imagem.jpg -> CATEGORIA
+      const fileName = pathParts[pathParts.length - 1] // último elemento é o nome do arquivo
+      
+      if (!categoriesMap.has(category)) {
+        categoriesMap.set(category, [])
+      }
+      
+      categoriesMap.get(category)!.push({
+        name: fileName,
+        code: path.parse(fileName).name,
+        url: `https://storage.googleapis.com/${bucketName}/${file.name}`,
+        category: category
+      })
+    })
+
+    // Converter para array de categorias
+    let categories = Array.from(categoriesMap.entries()).map(([categoryName, images]) => ({
+      id: categoryName,
+      name: categoryName,
+      slug: categoryName.toLowerCase().replace(/\s+/g, '-'),
+      images: images
+    }))
+
+    // Aplicar filtro de busca se especificado
     if (search) {
       const normalizedSearch = normalize(search)
       categories = categories.filter((cat) => normalize(cat.name).includes(normalizedSearch))
@@ -60,48 +115,28 @@ export async function GET(request: Request) {
     const totalPages = Math.max(1, Math.ceil(totalCategories / limit))
     const paginatedCategories = all ? categories : categories.slice((page - 1) * limit, page * limit)
 
-    // Para cada categoria, listar todas as imagens (sem filtrar pelo termo de busca)
-    const categoriesWithImages = paginatedCategories.map((cat) => {
-      const categoryPath = path.join(targetPath, cat.name)
-      let images: any[] = []
-      try {
-        const files = fs.readdirSync(categoryPath, { withFileTypes: true })
-        images = files
-          .filter((file) => file.isFile() && /\.(jpg|jpeg|png|webp)$/i.test(file.name))
-          .map((file) => ({
-            name: file.name,
-            code: path.parse(file.name).name,
-            url: `/files/${dir ? dir + '/' : ''}${cat.name}/${file.name}`,
-            category: cat.name
-          }))
-      } catch (e) {
-        images = []
-      }
-      return {
-        id: cat.name,
-        name: cat.name,
-        slug: cat.name.toLowerCase().replace(/\s+/g, '-'),
-        images
-      }
-    })
-
-    // Listar imagens do diretório atual (não das subpastas)
+    // Listar imagens do diretório atual (não das subpastas) - para compatibilidade
     let currentDirImages: any[] = []
-    try {
-      currentDirImages = items
-        .filter((item) => item.isFile() && /\.(jpg|jpeg|png|webp)$/i.test(item.name))
-        .map((file) => ({
-          name: file.name,
-          code: path.parse(file.name).name,
-          url: `/files/${dir ? dir + '/' : ''}${file.name}`,
-          category: dir || ''
-        }))
-    } catch (e) {
-      currentDirImages = []
+    if (dir) {
+      // Se estamos em um diretório específico, listar imagens diretas desse diretório
+      const directFiles = files.filter(file => {
+        const pathParts = file.name.split('/')
+        return pathParts.length === 3 && pathParts[2] === dir && /\.(jpg|jpeg|png|webp)$/i.test(file.name)
+      })
+      
+      currentDirImages = directFiles.map((file) => {
+        const fileName = file.name.split('/').pop()!
+        return {
+          name: fileName,
+          code: path.parse(fileName).name,
+          url: `https://storage.googleapis.com/${bucketName}/${file.name}`,
+          category: dir
+        }
+      })
     }
 
     return NextResponse.json({
-      categories: categoriesWithImages,
+      categories: paginatedCategories,
       images: currentDirImages,
       pagination: {
         total: totalCategories,

@@ -7,8 +7,13 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   images: {
-    domains: ['placeholder.svg'],
+    domains: ['placeholder.svg', 'storage.googleapis.com'],
     remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'storage.googleapis.com',
+        pathname: '/bucket-cenario-studio/**',
+      },
       {
         protocol: 'https',
         hostname: '**',
