@@ -2,6 +2,29 @@ import { NextResponse } from "next/server"
 import fs from "fs"
 import path from "path"
 import archiver from "archiver"
+import { Storage } from '@google-cloud/storage'
+
+// Função para inicializar o Google Cloud Storage
+function getStorage() {
+  const isCloudRun = process.env.K_SERVICE || process.env.K_REVISION || process.env.PORT
+  if (isCloudRun) {
+    return new Storage({
+      projectId: process.env.GCS_PROJECT_ID,
+    })
+  }
+  if (process.env.GCS_CLIENT_EMAIL && process.env.GCS_PRIVATE_KEY && process.env.GCS_PRIVATE_KEY.trim() !== '') {
+    return new Storage({
+      projectId: process.env.GCS_PROJECT_ID,
+      credentials: {
+        client_email: process.env.GCS_CLIENT_EMAIL,
+        private_key: process.env.GCS_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      },
+    })
+  }
+  return new Storage({
+    projectId: process.env.GCS_PROJECT_ID,
+  })
+}
 
 export async function POST(request: Request) {
   try {
@@ -19,32 +42,28 @@ export async function POST(request: Request) {
     const orderDir = path.join(tempDir, folderName)
     fs.mkdirSync(orderDir, { recursive: true })
 
-    // Buscar arquivos em /public/files
-    const filesDir = path.join(process.cwd(), "public", "files")
+    // Buscar e baixar arquivos do GCS
+    const storage = getStorage()
+    const bucketName = process.env.GCS_BUCKET_NAME
+    if (!bucketName) {
+      throw new Error("GCS_BUCKET_NAME não configurado")
+    }
+    
+    const bucket = storage.bucket(bucketName)
     const foundFiles: string[] = []
 
-    // Função recursiva para buscar arquivos
-    function findFiles(dir: string) {
-      const items = fs.readdirSync(dir, { withFileTypes: true })
-      
-      for (const item of items) {
-        const fullPath = path.join(dir, item.name)
-        
-        if (item.isDirectory()) {
-          findFiles(fullPath)
-        } else {
-          const fileName = path.parse(item.name).name
-          if (selectedImages.includes(fileName)) {
-            // Copiar arquivo diretamente para a pasta do pedido
-            const destPath = path.join(orderDir, item.name)
-            fs.copyFileSync(fullPath, destPath)
-            foundFiles.push(destPath)
-          }
-        }
+    // Listar todos os arquivos do bucket com prefixo public/files/
+    const [files] = await bucket.getFiles({ prefix: 'public/files/' })
+
+    // Filtrar e baixar apenas os arquivos selecionados
+    for (const file of files) {
+      const fileName = path.parse(file.name).name
+      if (selectedImages.includes(fileName)) {
+        const destPath = path.join(orderDir, path.basename(file.name))
+        await file.download({ destination: destPath })
+        foundFiles.push(destPath)
       }
     }
-
-    findFiles(filesDir)
 
     // Criar arquivo ZIP
     const zipPath = path.join(tempDir, `${folderName}.zip`)
