@@ -234,7 +234,6 @@ export default function AdminPage() {
     try {
       setDownloadingOrder(order.id)
       
-      // Preparar download
       const response = await fetch("/api/download", {
         method: "POST",
         headers: {
@@ -253,22 +252,35 @@ export default function AdminPage() {
         throw new Error(errorData.message || "Erro ao preparar download")
       }
 
-      const data = await response.json()
+      // Receber o blob diretamente
+      const blob = await response.blob()
       
-      if (data.foundFiles === 0) {
+      // Verificar se o blob está vazio (nenhum arquivo encontrado)
+      if (blob.size === 0) {
         toast.error({
           title: "Nenhum arquivo encontrado",
           description: "Não foi possível encontrar os arquivos selecionados",
         })
         return
       }
-
-      // Iniciar download
-      window.location.href = data.zipPath
+      
+      // Criar URL temporária para o blob
+      const url = window.URL.createObjectURL(blob)
+      
+      // Criar link temporário e clicar
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${order.created_at.split('T')[0]}_${order.customer_name}_${order.order}.zip`
+      document.body.appendChild(a)
+      a.click()
+      
+      // Limpar
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
       
       toast.success({
         title: "Download iniciado",
-        description: `${data.foundFiles} arquivos encontrados`,
+        description: `Arquivo ZIP baixado com sucesso`,
       })
     } catch (error) {
       console.error("Erro ao fazer download:", error)

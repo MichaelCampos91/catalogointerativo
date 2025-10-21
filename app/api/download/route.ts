@@ -30,10 +30,10 @@ export async function POST(request: Request) {
   try {
     const { selectedImages, customerName, orderNumber, date } = await request.json()
     
-    // Criar pasta temporária para os arquivos
-    const tempDir = path.join(process.cwd(), "public", "temp")
+    // Criar pasta temporária para os arquivos (usar /tmp no Cloud Run)
+    const tempDir = process.env.NODE_ENV === 'production' ? '/tmp' : path.join(process.cwd(), "public", "temp")
     if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir)
+      fs.mkdirSync(tempDir, { recursive: true })
     }
 
     // Criar pasta do pedido
@@ -76,16 +76,26 @@ export async function POST(request: Request) {
     archive.directory(orderDir, false)
     await archive.finalize()
 
-    // Limpar pasta temporária
+    // Aguardar finalização do ZIP
+    await new Promise((resolve, reject) => {
+      output.on('close', resolve)
+      output.on('error', reject)
+    })
+
+    // Ler o arquivo ZIP
+    const zipBuffer = fs.readFileSync(zipPath)
+
+    // Limpar arquivos temporários (pasta e ZIP)
     fs.rmSync(orderDir, { recursive: true, force: true })
+    fs.rmSync(zipPath, { force: true })
 
-    // Incluir o caminho base correto
-    const basePath = process.env.NEXT_PUBLIC_BASE_PATH || ""
-
-    return NextResponse.json({
-      success: true,
-      zipPath: `${basePath}/temp/${folderName}.zip`,
-      foundFiles: foundFiles.length
+    // Retornar o arquivo ZIP diretamente
+    return new NextResponse(zipBuffer, {
+      headers: {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename="${folderName}.zip"`,
+        'Content-Length': zipBuffer.length.toString(),
+      },
     })
   } catch (error) {
     console.error("Erro ao preparar download:", error)
