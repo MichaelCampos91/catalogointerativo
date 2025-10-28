@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
-import fs from "fs"
 import path from "path"
 import archiver from "archiver"
+import { PassThrough } from "stream"
 import { Storage } from '@google-cloud/storage'
 
 // Função para inicializar o Google Cloud Storage
@@ -29,18 +29,17 @@ function getStorage() {
 export async function POST(request: Request) {
   try {
     const { selectedImages, customerName, orderNumber, date } = await request.json()
-    
-    // Criar pasta temporária para os arquivos (usar /tmp no Cloud Run)
-    const tempDir = process.env.NODE_ENV === 'production' ? '/tmp' : path.join(process.cwd(), "public", "temp")
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true })
-    }
 
-    // Criar pasta do pedido
+    // Preparar nome seguro do arquivo final
     const orderDate = new Date(date).toISOString().split('T')[0]
-    const folderName = `${orderDate}_${customerName}_${orderNumber}`
-    const orderDir = path.join(tempDir, folderName)
-    fs.mkdirSync(orderDir, { recursive: true })
+    const sanitize = (s: string) => String(s || "")
+      .replace(/[\r\n]+/g, " ")
+      .replace(/\.{2,}/g, "")
+      .replace(/[\/\\]+/g, "_")
+      .replace(/[^\w\- \.]+/g, "")
+      .trim()
+      .slice(0, 80)
+    const folderName = `${orderDate}_${sanitize(customerName)}_${sanitize(orderNumber)}`
 
     // Buscar e baixar arquivos do GCS
     const storage = getStorage()
@@ -50,51 +49,40 @@ export async function POST(request: Request) {
     }
     
     const bucket = storage.bucket(bucketName)
-    const foundFiles: string[] = []
 
     // Listar todos os arquivos do bucket com prefixo public/files/
     const [files] = await bucket.getFiles({ prefix: 'public/files/' })
 
-    // Filtrar e baixar apenas os arquivos selecionados
-    for (const file of files) {
-      const fileName = path.parse(file.name).name
-      if (selectedImages.includes(fileName)) {
-        const destPath = path.join(orderDir, path.basename(file.name))
-        await file.download({ destination: destPath })
-        foundFiles.push(destPath)
-      }
+    // Filtrar apenas os arquivos selecionados por código (basename sem extensão)
+    const wanted = new Set<string>(selectedImages || [])
+    const matches = files.filter((file) => wanted.has(path.parse(file.name).name))
+
+    if (matches.length === 0) {
+      return NextResponse.json(
+        { error: 'Nenhum arquivo encontrado', message: 'Não foi possível localizar os arquivos solicitados' },
+        { status: 404 }
+      )
     }
 
-    // Criar arquivo ZIP
-    const zipPath = path.join(tempDir, `${folderName}.zip`)
-    const output = fs.createWriteStream(zipPath)
-    const archive = archiver("zip", {
-      zlib: { level: 9 }
-    })
+    // Criar ZIP em streaming diretamente para a resposta
+    const archive = archiver('zip', { zlib: { level: 9 } })
+    const pass = new PassThrough()
+    archive.pipe(pass)
 
-    archive.pipe(output)
-    archive.directory(orderDir, false)
-    await archive.finalize()
+    // Adicionar arquivos do GCS diretamente ao ZIP
+    for (const file of matches) {
+      const entryName = file.name.replace(/^public\//, '')
+      archive.append(file.createReadStream(), { name: entryName })
+    }
 
-    // Aguardar finalização do ZIP
-    await new Promise((resolve, reject) => {
-      output.on('close', resolve)
-      output.on('error', reject)
-    })
+    // Finalizar o ZIP (começa a ser enviado conforme é gerado)
+    archive.finalize()
 
-    // Ler o arquivo ZIP
-    const zipBuffer = fs.readFileSync(zipPath)
-
-    // Limpar arquivos temporários (pasta e ZIP)
-    fs.rmSync(orderDir, { recursive: true, force: true })
-    fs.rmSync(zipPath, { force: true })
-
-    // Retornar o arquivo ZIP diretamente
-    return new NextResponse(zipBuffer, {
+    return new NextResponse(pass as any, {
       headers: {
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="${folderName}.zip"`,
-        'Content-Length': zipBuffer.length.toString(),
+        'Cache-Control': 'no-store',
       },
     })
   } catch (error) {

@@ -233,6 +233,10 @@ export default function AdminPage() {
   const downloadOrderFiles = async (order: Order) => {
     try {
       setDownloadingOrder(order.id)
+      toast.info({
+        title: "Preparando download...",
+        description: "Estamos montando o arquivo para você",
+      })
       
       const response = await fetch("/api/download", {
         method: "POST",
@@ -248,21 +252,12 @@ export default function AdminPage() {
       })
 
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.message || "Erro ao preparar download")
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData?.message || "Erro ao preparar download")
       }
 
       // Receber o blob diretamente
       const blob = await response.blob()
-      
-      // Verificar se o blob está vazio (nenhum arquivo encontrado)
-      if (blob.size === 0) {
-        toast.error({
-          title: "Nenhum arquivo encontrado",
-          description: "Não foi possível encontrar os arquivos selecionados",
-        })
-        return
-      }
       
       // Criar URL temporária para o blob
       const url = window.URL.createObjectURL(blob)
