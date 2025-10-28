@@ -69,9 +69,23 @@ export async function POST(request: Request) {
     const pass = new PassThrough()
     archive.pipe(pass)
 
-    // Adicionar arquivos do GCS diretamente ao ZIP
+    // Adicionar arquivos do GCS diretamente ao ZIP (sem subpastas) com resolução de nomes duplicados
+    const usedNames = new Map<string, number>()
+    const getUniqueName = (baseName: string) => {
+      if (!usedNames.has(baseName)) {
+        usedNames.set(baseName, 1)
+        return baseName
+      }
+      const count = (usedNames.get(baseName) || 1) + 1
+      usedNames.set(baseName, count)
+      const ext = path.extname(baseName)
+      const nameOnly = baseName.slice(0, baseName.length - ext.length)
+      return `${nameOnly} (${count})${ext}`
+    }
+
     for (const file of matches) {
-      const entryName = file.name.replace(/^public\//, '')
+      const flatName = path.basename(file.name) // remove subpastas, mantém extensão
+      const entryName = getUniqueName(flatName)
       archive.append(file.createReadStream(), { name: entryName })
     }
 
