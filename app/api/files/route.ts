@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import path from "path"
 import { Storage } from '@google-cloud/storage'
+import sharp from 'sharp'
 
 // Função para inicializar o Google Cloud Storage
 function getStorage() {
@@ -120,8 +121,39 @@ export async function GET(request: Request) {
     
     // Agrupar arquivos por categoria (pasta)
     const categoriesMap = new Map<string, any[]>()
+    const foldersSet = new Set<string>() // Para detectar pastas vazias (com apenas .folder)
     
     files.forEach((file) => {
+      // Ignorar arquivos .folder (marcadores de pasta vazia)
+      if (file.name.endsWith('.folder')) {
+        // Extrair o nome da pasta do arquivo .folder
+        // Exemplo: public/files/CATEGORIA/.folder -> CATEGORIA
+        // Exemplo: public/files/DIR/SUBPASTA/.folder -> SUBPASTA (quando dir=DIR)
+        const pathParts = file.name.replace(basePrefix, '').split('/').filter(p => p && p !== '.folder')
+        if (pathParts.length > 0) {
+          const folderName = pathParts[pathParts.length - 1]
+          
+          // Se estamos na raiz (dir vazio), pegar a primeira pasta
+          // Se estamos em um diretório, pegar a pasta do nível imediatamente abaixo
+          if (!dir) {
+            // Na raiz: public/files/CATEGORIA/.folder -> categoria é CATEGORIA
+            if (pathParts.length === 1) {
+              foldersSet.add(folderName)
+            }
+          } else {
+            // Dentro de um dir: public/files/DIR/SUBPASTA/.folder -> categoria é SUBPASTA
+            const dirParts = dir.split('/').filter(p => p)
+            if (pathParts.length === dirParts.length + 1) {
+              const expectedDir = pathParts.slice(0, -1).join('/')
+              if (expectedDir === dir.replace(/\/+$/, '')) {
+                foldersSet.add(folderName)
+              }
+            }
+          }
+        }
+        return
+      }
+      
       // Pular se não for uma imagem
       if (!/\.(jpg|jpeg|png|webp)$/i.test(file.name)) return
       
@@ -129,8 +161,44 @@ export async function GET(request: Request) {
       const pathParts = file.name.split('/')
       if (pathParts.length < 3) return // Deve ter pelo menos public/files/categoria/imagem
       
-      const category = pathParts[2] // public/files/CATEGORIA/imagem.jpg -> CATEGORIA
-      const fileName = pathParts[pathParts.length - 1] // último elemento é o nome do arquivo
+      // Determinar qual é a categoria baseado no contexto
+      let category: string
+      let fileName: string
+      
+      if (!dir) {
+        // Na raiz: public/files/CATEGORIA/imagem.jpg -> categoria é CATEGORIA
+        category = pathParts[2]
+        fileName = pathParts[pathParts.length - 1]
+      } else {
+        // Dentro de um diretório: precisamos verificar se está no nível correto
+        const dirParts = dir.split('/').filter(p => p)
+        const filePathParts = file.name.replace(basePrefix, '').split('/').filter(p => p)
+        
+        // Se o arquivo está diretamente no diretório especificado (não em subpasta)
+        if (filePathParts.length === dirParts.length + 1) {
+          const fileDir = filePathParts.slice(0, -1).join('/')
+          if (fileDir === dir.replace(/\/+$/, '')) {
+            // É uma imagem no diretório atual, não uma categoria
+            // Isso será tratado no currentDirImages abaixo
+            return
+          }
+        }
+        
+        // Se o arquivo está em uma subpasta do diretório
+        if (filePathParts.length === dirParts.length + 2) {
+          const fileDir = filePathParts.slice(0, -1).join('/')
+          const expectedDir = dirParts.join('/')
+          if (filePathParts.slice(0, -2).join('/') === expectedDir) {
+            category = filePathParts[filePathParts.length - 2]
+            fileName = filePathParts[filePathParts.length - 1]
+          } else {
+            return
+          }
+        } else {
+          // Arquivo não está no contexto esperado
+          return
+        }
+      }
       
       if (!categoriesMap.has(category)) {
         categoriesMap.set(category, [])
@@ -142,6 +210,13 @@ export async function GET(request: Request) {
         url: `https://storage.googleapis.com/${bucketName}/${file.name}`,
         category: category
       })
+    })
+
+    // Adicionar pastas vazias (que só têm .folder) às categorias
+    foldersSet.forEach(folderName => {
+      if (!categoriesMap.has(folderName)) {
+        categoriesMap.set(folderName, [])
+      }
     })
 
     // Converter para array de categorias
@@ -251,10 +326,25 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: "Pasta já existe" }, { status: 400 })
         }
 
-        // No GCS, não precisamos criar a pasta fisicamente
-        // Ela será criada implicitamente quando o primeiro arquivo for enviado
-        console.log("API: Pasta validada com sucesso", { folderGcsPathWithSlash })
-        return NextResponse.json({ message: "Pasta criada com sucesso" })
+        // No GCS, precisamos criar um arquivo placeholder para que a pasta apareça nas listagens
+        // Criamos um arquivo marcador vazio dentro da pasta
+        const placeholderPath = `${folderGcsPathWithSlash}.folder`
+        const placeholderFile = bucket.file(placeholderPath)
+        
+        try {
+          // Criar arquivo placeholder vazio
+          await placeholderFile.save("", {
+            metadata: {
+              contentType: "application/x-directory",
+            },
+          })
+          
+          console.log("API: Pasta criada com sucesso", { folderGcsPathWithSlash, placeholderPath })
+          return NextResponse.json({ message: "Pasta criada com sucesso" })
+        } catch (createError) {
+          console.error("API: Erro ao criar pasta no GCS", { error: createError, placeholderPath })
+          throw new Error(`Erro ao criar pasta: ${createError instanceof Error ? createError.message : "Erro desconhecido"}`)
+        }
       }
 
       case "upload": {
@@ -275,13 +365,62 @@ export async function POST(request: Request) {
 
         // Converter File para Buffer
         const bytes = await file.arrayBuffer()
-        const buffer = Buffer.from(bytes)
+        let buffer = Buffer.from(bytes)
+        let contentType = file.type || "image/jpeg"
+
+        // Processar imagem se for um arquivo de imagem
+        const isImage = file.type?.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif|bmp|tiff)$/i.test(sanitizedFileName)
+        
+        if (isImage) {
+          try {
+            console.log("API: Processando imagem antes do upload", { originalSize: buffer.length, type: file.type })
+            
+            // Processar com sharp
+            const image = sharp(buffer)
+            const metadata = await image.metadata()
+            
+            // Redimensionar se largura > 1800px
+            let processedImage = image
+            if (metadata.width && metadata.width > 1800) {
+              processedImage = processedImage.resize(1800, null, {
+                withoutEnlargement: true,
+                fit: 'inside'
+              })
+            }
+            
+            // Aplicar compressão baseada no formato
+            if (file.type === 'image/jpeg' || /\.(jpg|jpeg)$/i.test(sanitizedFileName)) {
+              buffer = await processedImage.jpeg({ quality: 80 }).toBuffer()
+              contentType = "image/jpeg"
+            } else if (file.type === 'image/png' || /\.png$/i.test(sanitizedFileName)) {
+              buffer = await processedImage.png({ quality: 80, compressionLevel: 9 }).toBuffer()
+              contentType = "image/png"
+            } else if (file.type === 'image/webp' || /\.webp$/i.test(sanitizedFileName)) {
+              buffer = await processedImage.webp({ quality: 80 }).toBuffer()
+              contentType = "image/webp"
+            } else {
+              // Para outros formatos de imagem, converter para JPEG
+              buffer = await processedImage.jpeg({ quality: 80 }).toBuffer()
+              contentType = "image/jpeg"
+            }
+            
+            console.log("API: Imagem processada com sucesso", { 
+              newSize: buffer.length, 
+              originalSize: Buffer.from(bytes).length,
+              format: contentType
+            })
+          } catch (imageError) {
+            console.error("API: Erro ao processar imagem, fazendo upload original", { error: imageError })
+            // Fallback: usar buffer original se processamento falhar
+            buffer = Buffer.from(bytes)
+          }
+        }
 
         // Fazer upload para o GCS
         const gcsFile = bucket.file(gcsFilePath)
         await gcsFile.save(buffer, {
           metadata: {
-            contentType: file.type || "image/jpeg",
+            contentType: contentType,
           },
         })
 
