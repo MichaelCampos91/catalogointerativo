@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server"
-import fs from "fs"
 import path from "path"
-import { writeFile } from "fs/promises"
 import { Storage } from '@google-cloud/storage'
 
 // Função para inicializar o Google Cloud Storage
@@ -34,24 +32,48 @@ function getStorage() {
   })
 }
 
-// Função auxiliar para validar o caminho (mantida para compatibilidade com POST/DELETE)
-function validatePath(dir: string) {
-  const basePath = path.join(process.cwd(), "public", "files")
-  // Se o diretório for vazio, retornamos o basePath
-  if (!dir) {
-    return basePath
+// Função auxiliar para obter o bucket e path GCS
+function getBucketAndPath() {
+  const storage = getStorage()
+  const bucketName = process.env.GCS_BUCKET_NAME
+  if (!bucketName) {
+    throw new Error("GCS_BUCKET_NAME não configurado")
   }
+  const bucket = storage.bucket(bucketName)
+  return { bucket, bucketName }
+}
+
+// Função auxiliar para construir o caminho completo no GCS
+function getGcsPath(dir: string, filename?: string): string {
+  const basePrefix = "public/files/"
   
-  // Remover "files/" do início do caminho se existir
+  // Limpar o diretório: remover "files/" do início se existir
   const cleanDir = dir.startsWith("files/") ? dir.slice(6) : dir
-  const targetPath = path.join(basePath, cleanDir)
   
-  // Verifica se o caminho está dentro da pasta base
-  if (!targetPath.startsWith(basePath)) {
-    throw new Error("Caminho inválido")
+  // Construir o caminho
+  if (!cleanDir && !filename) {
+    return basePrefix
   }
   
-  return targetPath
+  if (!cleanDir && filename) {
+    return `${basePrefix}${filename}`
+  }
+  
+  if (cleanDir && filename) {
+    return `${basePrefix}${cleanDir}/${filename}`
+  }
+  
+  // Apenas diretório (para verificar pastas)
+  return `${basePrefix}${cleanDir}/`
+}
+
+// Função auxiliar para validar e sanitizar nomes de pastas/arquivos
+function sanitizeName(name: string): string {
+  // Remover caracteres perigosos
+  return name
+    .replace(/\.\./g, "") // Prevenir path traversal
+    .replace(/^\/+|\/+$/g, "") // Remover barras no início/fim
+    .trim()
 }
 
 // Função para normalizar strings (remover acentos, espaços extras e minúsculas)
@@ -185,43 +207,54 @@ export async function POST(request: Request) {
   try {
     const formData = await request.formData()
     const action = formData.get("action")
-    const dir = formData.get("dir") as string
+    const dir = (formData.get("dir") as string) || ""
 
     console.log("API: Recebendo requisição POST", { action, dir })
 
-    // Removemos a validação de dir obrigatório, pois agora aceitamos diretório vazio
-    const targetPath = validatePath(dir || "")
-    console.log("API: Caminho validado", { targetPath })
+    const { bucket } = getBucketAndPath()
 
     switch (action) {
       case "createFolder": {
         const folderName = formData.get("folderName") as string
-        console.log("API: Criando pasta", { folderName })
+        console.log("API: Criando pasta", { folderName, dir })
 
         if (!folderName) {
           console.error("API: Nome da pasta não especificado")
           return NextResponse.json({ error: "Nome da pasta não especificado" }, { status: 400 })
         }
 
-        const folderPath = path.join(targetPath, folderName)
-        console.log("API: Caminho completo da nova pasta", { folderPath })
+        // Sanitizar o nome da pasta
+        const sanitizedFolderName = sanitizeName(folderName)
+        if (!sanitizedFolderName) {
+          return NextResponse.json({ error: "Nome da pasta inválido" }, { status: 400 })
+        }
 
-        if (fs.existsSync(folderPath)) {
-          console.error("API: Pasta já existe", { folderPath })
+        // Construir o caminho completo da pasta no GCS
+        const folderGcsPath = getGcsPath(dir, sanitizedFolderName)
+        const folderGcsPathWithSlash = `${folderGcsPath}/`
+        
+        // Verificar se já existe um arquivo com esse nome exato (sem extensão)
+        const file = bucket.file(folderGcsPath)
+        const [fileExists] = await file.exists()
+        
+        if (fileExists) {
+          console.error("API: Já existe um arquivo com esse nome", { folderGcsPath })
+          return NextResponse.json({ error: "Já existe um arquivo com esse nome" }, { status: 400 })
+        }
+        
+        // No GCS, pastas são implícitas através de prefixos
+        // Verificar se já existem arquivos com esse prefixo (pasta já existe)
+        const [existingFiles] = await bucket.getFiles({ prefix: folderGcsPathWithSlash, maxResults: 1 })
+        
+        if (existingFiles.length > 0) {
+          console.error("API: Pasta já existe (já contém arquivos)", { folderGcsPathWithSlash })
           return NextResponse.json({ error: "Pasta já existe" }, { status: 400 })
         }
 
-        try {
-          fs.mkdirSync(folderPath, { recursive: true, mode: 0o775 })
-          console.log("API: Pasta criada com sucesso", { folderPath })
-          return NextResponse.json({ message: "Pasta criada com sucesso" })
-        } catch (mkdirError) {
-          console.error("API: Erro ao criar pasta", { error: mkdirError, folderPath })
-          return NextResponse.json(
-            { error: "Erro ao criar pasta", message: mkdirError instanceof Error ? mkdirError.message : "Erro desconhecido" },
-            { status: 500 }
-          )
-        }
+        // No GCS, não precisamos criar a pasta fisicamente
+        // Ela será criada implicitamente quando o primeiro arquivo for enviado
+        console.log("API: Pasta validada com sucesso", { folderGcsPathWithSlash })
+        return NextResponse.json({ message: "Pasta criada com sucesso" })
       }
 
       case "upload": {
@@ -229,19 +262,30 @@ export async function POST(request: Request) {
         if (!file) {
           return NextResponse.json({ error: "Arquivo não especificado" }, { status: 400 })
         }
-      
+
+        // Sanitizar o nome do arquivo
+        const sanitizedFileName = sanitizeName(file.name)
+        if (!sanitizedFileName) {
+          return NextResponse.json({ error: "Nome do arquivo inválido" }, { status: 400 })
+        }
+
+        // Construir o caminho completo no GCS
+        const gcsFilePath = getGcsPath(dir, sanitizedFileName)
+        console.log("API: Fazendo upload para GCS", { gcsFilePath })
+
+        // Converter File para Buffer
         const bytes = await file.arrayBuffer()
         const buffer = Buffer.from(bytes)
-        const filePath = path.join(targetPath, file.name)
-      
-        fs.writeFileSync(filePath, buffer)
-      
-        //Permissão 664 garantida aqui
-        fs.chmodSync(filePath, 0o664)
-        const stat = fs.statSync(filePath)
-        console.log("Permissões do arquivo:", stat.mode.toString(8))
-      
-        console.log("Backend: Arquivo salvo com sucesso", { filePath })
+
+        // Fazer upload para o GCS
+        const gcsFile = bucket.file(gcsFilePath)
+        await gcsFile.save(buffer, {
+          metadata: {
+            contentType: file.type || "image/jpeg",
+          },
+        })
+
+        console.log("API: Arquivo enviado com sucesso para GCS", { gcsFilePath })
         return NextResponse.json({ message: "Arquivo enviado com sucesso" })
       }
 
@@ -270,36 +314,65 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Nome do item não especificado" }, { status: 400 })
     }
 
-    const targetPath = validatePath(path.join(dir, itemPath))
-    console.log("API: Caminho validado", { targetPath })
+    const { bucket } = getBucketAndPath()
+
+    // Sanitizar o caminho do item
+    const sanitizedItemPath = sanitizeName(itemPath)
+    if (!sanitizedItemPath) {
+      return NextResponse.json({ error: "Caminho do item inválido" }, { status: 400 })
+    }
+
+    // Construir o caminho completo no GCS
+    // Se dir está vazio, itemPath é o caminho direto da raiz
+    // Se dir tem valor, itemPath é relativo ao dir
+    const gcsPathAsFile = getGcsPath(dir, sanitizedItemPath)
+    const gcsPathAsFolder = `${gcsPathAsFile}/`
+
+    console.log("API: Caminhos GCS construídos", { gcsPathAsFile, gcsPathAsFolder })
+
+    // Primeiro, verificar se é um arquivo específico
+    const file = bucket.file(gcsPathAsFile)
+    const [fileExists] = await file.exists()
+
+    if (fileExists) {
+      // É um arquivo específico
+      console.log("API: Excluindo arquivo", { gcsPathAsFile })
+      try {
+        await file.delete()
+        console.log("API: Arquivo excluído com sucesso")
+        return NextResponse.json({ message: "Arquivo excluído com sucesso" })
+      } catch (deleteError) {
+        console.error("API: Erro ao excluir arquivo", { error: deleteError, gcsPathAsFile })
+        return NextResponse.json(
+          { 
+            error: "Erro ao excluir arquivo", 
+            message: deleteError instanceof Error ? deleteError.message : "Erro desconhecido"
+          },
+          { status: 500 }
+        )
+      }
+    }
+
+    // Se não é arquivo, verificar se é uma pasta (tem arquivos com esse prefixo)
+    const [folderFiles] = await bucket.getFiles({ prefix: gcsPathAsFolder })
     
-    if (!fs.existsSync(targetPath)) {
-      console.error("API: Item não encontrado", { targetPath })
+    if (folderFiles.length === 0) {
+      console.error("API: Item não encontrado", { gcsPathAsFile, gcsPathAsFolder })
       return NextResponse.json({ error: "Item não encontrado" }, { status: 404 })
     }
 
-    const stats = fs.statSync(targetPath)
-    const isDirectory = stats.isDirectory()
-
+    // É uma pasta - deletar todos os arquivos com esse prefixo
+    console.log("API: Excluindo pasta com arquivos", { gcsPathAsFolder, count: folderFiles.length })
     try {
-      if (isDirectory) {
-        console.log("API: Excluindo pasta", { targetPath })
-        fs.rmSync(targetPath, { recursive: true, force: true })
-        console.log("API: Pasta excluída com sucesso")
-        return NextResponse.json({ message: "Pasta excluída com sucesso" })
-      } else {
-        console.log("API: Excluindo arquivo", { targetPath })
-        fs.unlinkSync(targetPath)
-        console.log("API: Arquivo excluído com sucesso")
-        return NextResponse.json({ message: "Arquivo excluído com sucesso" })
-      }
+      await Promise.all(folderFiles.map(file => file.delete()))
+      console.log("API: Pasta excluída com sucesso", { count: folderFiles.length })
+      return NextResponse.json({ message: "Pasta excluída com sucesso" })
     } catch (deleteError) {
-      console.error("API: Erro ao excluir item", { error: deleteError, targetPath })
+      console.error("API: Erro ao excluir pasta", { error: deleteError, gcsPathAsFolder })
       return NextResponse.json(
         { 
-          error: "Erro ao excluir item", 
-          message: deleteError instanceof Error ? deleteError.message : "Erro desconhecido",
-          details: isDirectory ? "Erro ao excluir pasta" : "Erro ao excluir arquivo"
+          error: "Erro ao excluir pasta", 
+          message: deleteError instanceof Error ? deleteError.message : "Erro desconhecido"
         },
         { status: 500 }
       )
