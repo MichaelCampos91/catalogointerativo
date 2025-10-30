@@ -88,23 +88,56 @@ export default function ConfirmedPage() {
 
   const loadImageUrls = async (imageCodes: string[]) => {
     try {
-      const urls: ImageUrl[] = []
-      for (const code of imageCodes) {
-        const response = await fetch(`/api/images?code=${encodeURIComponent(code)}`)
-        if (response.ok) {
-          const data = await response.json()
-          urls.push({ code, url: data.url })
-        } else {
-          // Fallback para placeholder se a API falhar
-          urls.push({ code, url: PLACEHOLDER_URL })
+      // Buscar lista completa no novo endpoint dinâmico, como no catálogo
+      const res = await fetch(`/api/files?all=true&limit=9999&page=1`)
+      if (!res.ok) throw new Error('Falha ao listar arquivos')
+      const j = await res.json()
+
+      // Mapear code -> url a partir de `images` e `categories[*].images`
+      const codeToUrl: Record<string, string> = {}
+      if (Array.isArray(j.images)) {
+        for (const img of j.images) {
+          if (img && img.code && img.url) codeToUrl[img.code] = img.url
         }
       }
+      if (Array.isArray(j.categories)) {
+        for (const cat of j.categories) {
+          if (cat && Array.isArray(cat.images)) {
+            for (const img of cat.images) {
+              if (img && img.code && img.url) codeToUrl[img.code] = img.url
+            }
+          }
+        }
+      }
+
+      const urls: ImageUrl[] = imageCodes.map((code) => ({
+        code,
+        url: codeToUrl[code] || PLACEHOLDER_URL,
+      }))
       setImageUrls(urls)
-    } catch (error) {
-      console.error("Erro ao carregar URLs das imagens:", error)
-      // Fallback para placeholder
-      const urls = imageCodes.map(code => ({ code, url: PLACEHOLDER_URL }))
-      setImageUrls(urls)
+    } catch (e) {
+      // Fallback: tentar endpoint legado por código
+      try {
+        const urls: ImageUrl[] = []
+        for (const code of imageCodes) {
+          try {
+            const r = await fetch(`/api/images?code=${encodeURIComponent(code)}`)
+            if (r.ok) {
+              const d = await r.json()
+              urls.push({ code, url: d.url })
+            } else {
+              urls.push({ code, url: PLACEHOLDER_URL })
+            }
+          } catch {
+            urls.push({ code, url: PLACEHOLDER_URL })
+          }
+        }
+        setImageUrls(urls)
+      } catch (error) {
+        console.error('Erro ao carregar URLs das imagens:', error)
+        const urls = imageCodes.map((code) => ({ code, url: PLACEHOLDER_URL }))
+        setImageUrls(urls)
+      }
     }
   }
 
