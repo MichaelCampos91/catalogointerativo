@@ -88,6 +88,13 @@ export default function ConfirmedPage() {
 
   const loadImageUrls = async (imageCodes: string[]) => {
     try {
+      const normalizeCode = (code: string) => {
+        // Remover extensão e pontos finais extras; comparar em maiúsculas
+        const noExt = code.replace(/\.(jpg|jpeg|png|gif|webp)$/i, '')
+        const cleaned = noExt.replace(/\.+$/, '')
+        return cleaned.trim().toUpperCase()
+      }
+
       // Buscar lista completa no novo endpoint dinâmico, como no catálogo
       const res = await fetch(`/api/files?all=true&limit=9999&page=1`)
       if (!res.ok) throw new Error('Falha ao listar arquivos')
@@ -97,41 +104,39 @@ export default function ConfirmedPage() {
       const codeToUrl: Record<string, string> = {}
       if (Array.isArray(j.images)) {
         for (const img of j.images) {
-          if (img && img.code && img.url) codeToUrl[img.code] = img.url
+          if (img && img.code && img.url) codeToUrl[normalizeCode(img.code)] = img.url
         }
       }
       if (Array.isArray(j.categories)) {
         for (const cat of j.categories) {
           if (cat && Array.isArray(cat.images)) {
             for (const img of cat.images) {
-              if (img && img.code && img.url) codeToUrl[img.code] = img.url
+              if (img && img.code && img.url) codeToUrl[normalizeCode(img.code)] = img.url
             }
           }
         }
       }
 
-      const urls: ImageUrl[] = imageCodes.map((code) => ({
-        code,
-        url: codeToUrl[code] || PLACEHOLDER_URL,
-      }))
+      const urls: ImageUrl[] = imageCodes.map((code) => {
+        const key = normalizeCode(code)
+        return { code, url: codeToUrl[key] || PLACEHOLDER_URL }
+      })
       setImageUrls(urls)
     } catch (e) {
       // Fallback: tentar endpoint legado por código
       try {
-        const urls: ImageUrl[] = []
-        for (const code of imageCodes) {
-          try {
-            const r = await fetch(`/api/images?code=${encodeURIComponent(code)}`)
-            if (r.ok) {
-              const d = await r.json()
-              urls.push({ code, url: d.url })
-            } else {
-              urls.push({ code, url: PLACEHOLDER_URL })
-            }
-          } catch {
-            urls.push({ code, url: PLACEHOLDER_URL })
-          }
-        }
+        const urls: ImageUrl[] = await Promise.all(
+          imageCodes.map(async (code) => {
+            try {
+              const r = await fetch(`/api/images?code=${encodeURIComponent(code)}`)
+              if (r.ok) {
+                const d = await r.json()
+                return { code, url: d.url }
+              }
+            } catch {}
+            return { code, url: PLACEHOLDER_URL }
+          })
+        )
         setImageUrls(urls)
       } catch (error) {
         console.error('Erro ao carregar URLs das imagens:', error)
