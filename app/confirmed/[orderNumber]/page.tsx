@@ -88,13 +88,6 @@ export default function ConfirmedPage() {
 
   const loadImageUrls = async (imageCodes: string[]) => {
     try {
-      const normalizeCode = (code: string) => {
-        // Remover extensão e pontos finais extras; comparar em maiúsculas
-        const noExt = code.replace(/\.(jpg|jpeg|png|gif|webp)$/i, '')
-        const cleaned = noExt.replace(/\.+$/, '')
-        return cleaned.trim().toUpperCase()
-      }
-
       // Buscar lista completa no novo endpoint dinâmico, como no catálogo
       const res = await fetch(`/api/files?all=true&limit=9999&page=1`)
       if (!res.ok) throw new Error('Falha ao listar arquivos')
@@ -104,23 +97,27 @@ export default function ConfirmedPage() {
       const codeToUrl: Record<string, string> = {}
       if (Array.isArray(j.images)) {
         for (const img of j.images) {
-          if (img && img.code && img.url) codeToUrl[normalizeCode(img.code)] = img.url
+          if (img && img.code && img.url) codeToUrl[img.code] = img.url
         }
       }
       if (Array.isArray(j.categories)) {
         for (const cat of j.categories) {
           if (cat && Array.isArray(cat.images)) {
             for (const img of cat.images) {
-              if (img && img.code && img.url) codeToUrl[normalizeCode(img.code)] = img.url
+              if (img && img.code && img.url) codeToUrl[img.code] = img.url
             }
           }
         }
       }
 
+      console.log('[CONFIRMED] Códigos buscados do pedido:', imageCodes)
+      console.log('[CONFIRMED] Mapeamento codeToUrl montado:', codeToUrl)
+
       const urls: ImageUrl[] = imageCodes.map((code) => {
-        const key = normalizeCode(code)
-        return { code, url: codeToUrl[key] || PLACEHOLDER_URL }
+        return { code, url: codeToUrl[code] || PLACEHOLDER_URL }
       })
+      
+      console.log('[CONFIRMED] URLs finais montadas:', urls)
       setImageUrls(urls)
     } catch (e) {
       // Fallback: tentar endpoint legado por código
