@@ -60,7 +60,75 @@ export default function CatalogPage() {
   const [imagesCache, setImagesCache] = useState<Record<string, { code: string; image_url: string; category_id: string }>>({})
   const router = useRouter()
 
+  // Constantes para cache
+  const CACHE_EXPIRATION = 3600000 // 1 hora em milissegundos
+  const CATALOG_CACHE_KEY = 'catalogData'
+  
+  // Função auxiliar para validar e recuperar cache com timestamp
+  const getValidCache = <T,>(key: string): T | null => {
+    try {
+      const cached = localStorage.getItem(key)
+      if (!cached) return null
+      
+      const parsed = JSON.parse(cached)
+      if (!parsed.timestamp || !parsed.expiresAt) return null
+      
+      // Verificar se o cache ainda é válido
+      if (Date.now() >= parsed.expiresAt) {
+        localStorage.removeItem(key)
+        return null
+      }
+      
+      return parsed.data as T
+    } catch {
+      return null
+    }
+  }
+  
+  // Função auxiliar para salvar cache com timestamp
+  const setCacheWithTimestamp = <T,>(key: string, data: T): void => {
+    try {
+      const now = Date.now()
+      const cacheEntry = {
+        data,
+        timestamp: now,
+        expiresAt: now + CACHE_EXPIRATION
+      }
+      localStorage.setItem(key, JSON.stringify(cacheEntry))
+    } catch (error) {
+      console.error('Erro ao salvar cache:', error)
+    }
+  }
+  
+  // Limpar caches expirados
+  const cleanupExpiredCaches = (): void => {
+    const keysToCheck = [CATALOG_CACHE_KEY]
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && key.startsWith("imageCache:")) {
+        keysToCheck.push(key)
+      }
+    }
+    
+    keysToCheck.forEach(key => {
+      try {
+        const cached = localStorage.getItem(key)
+        if (cached) {
+          const parsed = JSON.parse(cached)
+          if (parsed.expiresAt && Date.now() >= parsed.expiresAt) {
+            localStorage.removeItem(key)
+          }
+        }
+      } catch {
+        // Ignorar erros de parsing
+      }
+    })
+  }
+
   useEffect(() => {
+    // Limpar caches expirados ao inicializar
+    cleanupExpiredCaches()
+    
     const data = localStorage.getItem("customerData")
     if (data) {
       const parsed = JSON.parse(data)
@@ -75,9 +143,11 @@ export default function CatalogPage() {
         }
       }
       keysToRemove.forEach((k) => localStorage.removeItem(k))
-      const cached = localStorage.getItem(currentCacheKey)
-      if (cached) {
-        try { setImagesCache(JSON.parse(cached)) } catch {}
+      
+      // Carregar cache válido de imagens
+      const cachedImages = getValidCache<Record<string, { code: string; image_url: string; category_id: string }>>(currentCacheKey)
+      if (cachedImages) {
+        setImagesCache(cachedImages)
       }
     }
   
@@ -175,10 +245,10 @@ export default function CatalogPage() {
                   if (Object.keys(result).length >= 200) break
                 }
               }
-              try { localStorage.setItem(`imageCache:${customerData.orderNumber}`, JSON.stringify(result)) } catch {}
+              setCacheWithTimestamp(`imageCache:${customerData.orderNumber}`, result)
               return result
             }
-            try { localStorage.setItem(`imageCache:${customerData.orderNumber}`, JSON.stringify(merged)) } catch {}
+            setCacheWithTimestamp(`imageCache:${customerData.orderNumber}`, merged)
             return merged
           })
         }
@@ -199,6 +269,36 @@ export default function CatalogPage() {
   const loadCatalogData = async (page = 1, search = "") => {
     try {
       setError(null)
+      
+      // Verificar cache apenas na primeira página e sem busca
+      if (page === 1 && !search) {
+        const cachedData = getValidCache<any>(CATALOG_CACHE_KEY)
+        if (cachedData) {
+          console.log('✅ Usando cache do catálogo')
+          setCategories(cachedData.categories || [])
+          setImages(cachedData.images || [])
+          setPagination(cachedData.pagination || pagination)
+          
+          // Atualizar cache de imagens
+          if (customerData) {
+            const updatedCache: Record<string, { code: string; image_url: string; category_id: string }> = {}
+            cachedData.images?.forEach((img: any) => {
+              updatedCache[img.code] = { code: img.code, image_url: img.image_url, category_id: img.category_id }
+            })
+            if (Object.keys(updatedCache).length > 0) {
+              setImagesCache((prev) => {
+                const merged = { ...prev, ...updatedCache }
+                const cacheKey = `imageCache:${customerData.orderNumber}`
+                setCacheWithTimestamp(cacheKey, merged)
+                return merged
+              })
+            }
+          }
+          
+          return
+        }
+      }
+      
       if (page === 1) {
         setLoading(true)
       } else {
@@ -249,6 +349,16 @@ export default function CatalogPage() {
         setImages((prev) => [...prev, ...newImages])
       }
       setPagination(data.pagination)
+      
+      // Salvar no cache apenas na primeira página e sem busca
+      if (page === 1 && !search) {
+        setCacheWithTimestamp(CATALOG_CACHE_KEY, {
+          categories: newCategories,
+          images: newImages,
+          pagination: data.pagination
+        })
+      }
+      
       // Atualizar cache de imagens vistas e persistir por pedido (cap 200)
       if (customerData) {
         setImagesCache((prev) => {
@@ -271,10 +381,10 @@ export default function CatalogPage() {
                 if (Object.keys(result).length >= 200) break
               }
             }
-            try { localStorage.setItem(`imageCache:${customerData.orderNumber}`, JSON.stringify(result)) } catch {}
+            setCacheWithTimestamp(`imageCache:${customerData.orderNumber}`, result)
             return result
           }
-          try { localStorage.setItem(`imageCache:${customerData.orderNumber}`, JSON.stringify(updated)) } catch {}
+          setCacheWithTimestamp(`imageCache:${customerData.orderNumber}`, updated)
           return updated
         })
       }

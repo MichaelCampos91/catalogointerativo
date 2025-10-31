@@ -50,8 +50,16 @@ export async function POST(request: Request) {
     
     const bucket = storage.bucket(bucketName)
 
-    // Listar todos os arquivos do bucket com prefixo public/files/
-    const [files] = await bucket.getFiles({ prefix: 'public/files/' })
+    // Listar arquivos do bucket com prefixo public/files/ e limite de 5000
+    const [files] = await bucket.getFiles({ 
+      prefix: 'public/files/',
+      maxResults: 5000
+    })
+    
+    // Verificar se pode ter mais arquivos além do limite
+    if (files.length === 5000) {
+      console.warn('⚠️ Limite de 5000 arquivos atingido na listagem. Alguns arquivos podem não estar disponíveis.')
+    }
 
     // Filtrar apenas os arquivos selecionados por código (basename sem extensão)
     const wanted = new Set<string>(selectedImages || [])
@@ -59,9 +67,18 @@ export async function POST(request: Request) {
 
     if (matches.length === 0) {
       return NextResponse.json(
-        { error: 'Nenhum arquivo encontrado', message: 'Não foi possível localizar os arquivos solicitados' },
+        { 
+          error: 'Nenhum arquivo encontrado', 
+          message: 'Não foi possível localizar os arquivos solicitados. Verifique se os códigos estão corretos ou se o limite de 5000 arquivos foi atingido.' 
+        },
         { status: 404 }
       )
+    }
+    
+    // Verificar se todos os arquivos solicitados foram encontrados
+    if (matches.length < wanted.size) {
+      const missing = Array.from(wanted).filter(code => !matches.some(file => path.parse(file.name).name === code))
+      console.warn('⚠️ Alguns arquivos não foram encontrados:', missing)
     }
 
     // Criar ZIP em streaming diretamente para a resposta

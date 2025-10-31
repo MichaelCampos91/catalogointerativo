@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import path from "path"
 import { Storage } from '@google-cloud/storage'
 import sharp from 'sharp'
+import { getFromCache, setCache, generateCacheKey, invalidateCache, getSignedUrl } from '@/lib/gcs-cache'
 
 // Função para inicializar o Google Cloud Storage
 function getStorage() {
@@ -116,14 +117,30 @@ export async function GET(request: Request) {
     const basePrefix = "public/files/"
     const searchPrefix = dir ? `${basePrefix}${dir}/` : basePrefix
 
+    // Verificar cache antes de buscar do GCS
+    const cacheKey = generateCacheKey(searchPrefix, dir, search, page, limit, all)
+    const cachedData = getFromCache(cacheKey)
+    
+    if (cachedData) {
+      console.log('✅ Retornando dados do cache:', cacheKey)
+      return NextResponse.json(cachedData, {
+        headers: {
+          'Cache-Control': 'public, max-age=900',
+          'X-Cache': 'HIT'
+        }
+      })
+    }
+
     // Listar arquivos do bucket
     const [files] = await bucket.getFiles({ prefix: searchPrefix })
     
     // Agrupar arquivos por categoria (pasta)
     const categoriesMap = new Map<string, any[]>()
     const foldersSet = new Set<string>() // Para detectar pastas vazias (com apenas .folder)
+    const filesToProcess: Array<{ file: any; category: string; fileName: string }> = []
     
-    files.forEach((file) => {
+    // Primeiro passo: processar arquivos e coletar os que precisam de signed URLs
+    for (const file of files) {
       // Ignorar arquivos .folder (marcadores de pasta vazia)
       if (file.name.endsWith('.folder')) {
         // Extrair o nome da pasta do arquivo .folder
@@ -151,15 +168,15 @@ export async function GET(request: Request) {
             }
           }
         }
-        return
+        continue
       }
       
       // Pular se não for uma imagem
-      if (!/\.(jpg|jpeg|png|webp)$/i.test(file.name)) return
+      if (!/\.(jpg|jpeg|png|webp)$/i.test(file.name)) continue
       
       // Extrair categoria do caminho: public/files/CATEGORIA/imagem.jpg
       const pathParts = file.name.split('/')
-      if (pathParts.length < 3) return // Deve ter pelo menos public/files/categoria/imagem
+      if (pathParts.length < 3) continue // Deve ter pelo menos public/files/categoria/imagem
       
       // Determinar qual é a categoria baseado no contexto
       let category: string
@@ -180,7 +197,7 @@ export async function GET(request: Request) {
           if (fileDir === dir.replace(/\/+$/, '')) {
             // É uma imagem no diretório atual, não uma categoria
             // Isso será tratado no currentDirImages abaixo
-            return
+            continue
           }
         }
         
@@ -192,11 +209,11 @@ export async function GET(request: Request) {
             category = filePathParts[filePathParts.length - 2]
             fileName = filePathParts[filePathParts.length - 1]
           } else {
-            return
+            continue
           }
         } else {
           // Arquivo não está no contexto esperado
-          return
+          continue
         }
       }
       
@@ -204,10 +221,20 @@ export async function GET(request: Request) {
         categoriesMap.set(category, [])
       }
       
+      // Coletar arquivo para processar signed URLs depois
+      filesToProcess.push({ file, category, fileName })
+    }
+    
+    // Segundo passo: gerar todas as signed URLs em paralelo
+    const signedUrlPromises = filesToProcess.map(({ file }) => getSignedUrl(file, bucketName))
+    const signedUrls = await Promise.all(signedUrlPromises)
+    
+    // Terceiro passo: adicionar arquivos com signed URLs ao mapa de categorias
+    filesToProcess.forEach(({ category, fileName }, index) => {
       categoriesMap.get(category)!.push({
         name: fileName,
         code: path.parse(fileName).name,
-        url: `https://storage.googleapis.com/${bucketName}/${file.name}`,
+        url: signedUrls[index],
         category: category
       })
     })
@@ -247,18 +274,23 @@ export async function GET(request: Request) {
         return pathParts.length === 3 && pathParts[2] === dir && /\.(jpg|jpeg|png|webp)$/i.test(file.name)
       })
       
-      currentDirImages = directFiles.map((file) => {
-        const fileName = file.name.split('/').pop()!
-        return {
-          name: fileName,
-          code: path.parse(fileName).name,
-          url: `https://storage.googleapis.com/${bucketName}/${file.name}`,
-          category: dir
-        }
-      })
+      // Gerar signed URLs para imagens do diretório atual
+      const imagesWithSignedUrls = await Promise.all(
+        directFiles.map(async (file) => {
+          const fileName = file.name.split('/').pop()!
+          const signedUrl = await getSignedUrl(file, bucketName)
+          return {
+            name: fileName,
+            code: path.parse(fileName).name,
+            url: signedUrl,
+            category: dir
+          }
+        })
+      )
+      currentDirImages = imagesWithSignedUrls
     }
 
-    return NextResponse.json({
+    const responseData = {
       categories: paginatedCategories,
       images: currentDirImages,
       pagination: {
@@ -266,6 +298,16 @@ export async function GET(request: Request) {
         page,
         limit,
         totalPages
+      }
+    }
+
+    // Armazenar no cache
+    setCache(cacheKey, responseData)
+
+    return NextResponse.json(responseData, {
+      headers: {
+        'Cache-Control': 'public, max-age=900',
+        'X-Cache': 'MISS'
       }
     })
   } catch (error) {
@@ -340,6 +382,12 @@ export async function POST(request: Request) {
           })
           
           console.log("API: Pasta criada com sucesso", { folderGcsPathWithSlash, placeholderPath })
+          
+          // Invalidar cache relacionado ao diretório
+          const basePrefix = "public/files/"
+          const dirPrefix = dir ? `${basePrefix}${dir}/` : basePrefix
+          invalidateCache(dirPrefix)
+          
           return NextResponse.json({ message: "Pasta criada com sucesso" })
         } catch (createError) {
           console.error("API: Erro ao criar pasta no GCS", { error: createError, placeholderPath })
@@ -425,6 +473,12 @@ export async function POST(request: Request) {
         })
 
         console.log("API: Arquivo enviado com sucesso para GCS", { gcsFilePath })
+        
+        // Invalidar cache relacionado ao diretório
+        const basePrefix = "public/files/"
+        const dirPrefix = dir ? `${basePrefix}${dir}/` : basePrefix
+        invalidateCache(dirPrefix)
+        
         return NextResponse.json({ message: "Arquivo enviado com sucesso" })
       }
 
@@ -479,6 +533,12 @@ export async function DELETE(request: Request) {
       try {
         await file.delete()
         console.log("API: Arquivo excluído com sucesso")
+        
+        // Invalidar cache relacionado ao diretório
+        const basePrefix = "public/files/"
+        const dirPrefix = dir ? `${basePrefix}${dir}/` : basePrefix
+        invalidateCache(dirPrefix)
+        
         return NextResponse.json({ message: "Arquivo excluído com sucesso" })
       } catch (deleteError) {
         console.error("API: Erro ao excluir arquivo", { error: deleteError, gcsPathAsFile })
@@ -505,6 +565,12 @@ export async function DELETE(request: Request) {
     try {
       await Promise.all(folderFiles.map(file => file.delete()))
       console.log("API: Pasta excluída com sucesso", { count: folderFiles.length })
+      
+      // Invalidar cache relacionado ao diretório
+      const basePrefix = "public/files/"
+      const dirPrefix = dir ? `${basePrefix}${dir}/` : basePrefix
+      invalidateCache(dirPrefix)
+      
       return NextResponse.json({ message: "Pasta excluída com sucesso" })
     } catch (deleteError) {
       console.error("API: Erro ao excluir pasta", { error: deleteError, gcsPathAsFolder })
