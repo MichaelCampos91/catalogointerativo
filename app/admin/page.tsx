@@ -256,6 +256,21 @@ export default function AdminPage() {
         throw new Error(errorData?.message || "Erro ao preparar download")
       }
 
+      // Avisos do servidor (duplicatas ignoradas)
+      const warningHeader = response.headers.get('X-Warning')
+      if (warningHeader) {
+        const decoded = warningHeader
+          .split(' | ')
+          .map((s) => {
+            try { return decodeURIComponent(s) } catch { return s }
+          })
+          .join('\n')
+        toast.warning({
+          title: "Aviso",
+          description: decoded,
+        })
+      }
+
       // Receber o blob diretamente
       const blob = await response.blob()
       
@@ -513,6 +528,45 @@ export default function AdminPage() {
     // Usar o estado separado para garantir que os dados não mudem após atualização
     const references = selectedOrdersDataForList.map(order => generateOrderReference(order)).join('\n')
     copyToClipboard(references)
+  }
+
+  // Helper: obter medida de material pela quantidade
+  function getMeasureForQuantity(quantity: number): string {
+    const measureTable: { [key: number]: string } = {
+      2: "1,58",
+      4: "1,58",
+      6: "1,58",
+      8: "1,67",
+      10: "2,22",
+      11: "2,26",
+      12: "2,44",
+      16: "3,33",
+      17: "3,37",
+      20: "3,89",
+      21: "4,09",
+      24: "4,65",
+      26: "5,03",
+      28: "5,55",
+      30: "5,76",
+      32: "6,10",
+      35: "6,71",
+      36: "6,87",
+      40: "7,76",
+      60: "11,32",
+    }
+    return measureTable[quantity] || "N/A"
+  }
+
+  // Copiar como tabela (Referência \t Medida)
+  const handleCopyReferencesAsTable = () => {
+    const lines = selectedOrdersDataForList.map((order) => {
+      const refWithMeasure = generateOrderReference(order)
+      const lastSpace = refWithMeasure.lastIndexOf(" ")
+      const reference = lastSpace > -1 ? refWithMeasure.slice(0, lastSpace) : refWithMeasure
+      const measure = getMeasureForQuantity(order.quantity_purchased)
+      return `${reference}\t${measure}`
+    })
+    copyToClipboard(lines.join("\n"))
   }
 
   // Nova função: checa se todos os pedidos selecionados estão em produção
@@ -1203,6 +1257,9 @@ export default function AdminPage() {
               </Button>
               <Button onClick={handleCopyOrderNumbers}>
                 Copiar Números
+              </Button>
+              <Button onClick={handleCopyReferencesAsTable}>
+                Copiar Tabela
               </Button>
               <Button onClick={handleCopyReferences}>
                 Copiar Referências

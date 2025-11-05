@@ -1,52 +1,43 @@
 import { NextResponse } from "next/server"
 import path from "path"
-import { Storage } from '@google-cloud/storage'
+import { S3Client, ListObjectsV2Command, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
 import sharp from 'sharp'
-import { getFromCache, setCache, generateCacheKey, invalidateCache, getSignedUrl } from '@/lib/gcs-cache'
+import { getFromCache, setCache, generateCacheKey, invalidateCache, getSignedUrlForR2 } from '@/lib/r2-cache'
 
-// Função para inicializar o Google Cloud Storage
-function getStorage() {
-  // Detectar se estamos no Cloud Run (verificar variáveis específicas do Cloud Run)
-  const isCloudRun = process.env.K_SERVICE || process.env.K_REVISION || process.env.PORT
+// Função para inicializar o S3Client para Cloudflare R2
+function getS3Client() {
+  const accountId = process.env.R2_ACCOUNT_ID
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY
   
-  // No Cloud Run, use Application Default Credentials
-  if (isCloudRun) {
-    return new Storage({
-      projectId: process.env.GCS_PROJECT_ID,
-      // ADC será usado automaticamente no Cloud Run
-    })
+  if (!accountId || !accessKeyId || !secretAccessKey) {
+    throw new Error("Credenciais R2 não configuradas")
   }
-  
-  // Para desenvolvimento local, use credenciais do .env se disponíveis
-  if (process.env.GCS_CLIENT_EMAIL && process.env.GCS_PRIVATE_KEY && process.env.GCS_PRIVATE_KEY.trim() !== '') {
-    return new Storage({
-      projectId: process.env.GCS_PROJECT_ID,
-      credentials: {
-        client_email: process.env.GCS_CLIENT_EMAIL,
-        private_key: process.env.GCS_PRIVATE_KEY.replace(/\\n/g, '\n'),
-      },
-    })
-  }
-  
-  // Fallback para ADC local (se gcloud auth application-default login foi executado)
-  return new Storage({
-    projectId: process.env.GCS_PROJECT_ID,
+
+  const endpoint = process.env.R2_ENDPOINT || `https://${accountId}.r2.cloudflarestorage.com`
+
+  return new S3Client({
+    region: "auto",
+    endpoint: endpoint,
+    credentials: {
+      accessKeyId: accessKeyId,
+      secretAccessKey: secretAccessKey,
+    },
   })
 }
 
-// Função auxiliar para obter o bucket e path GCS
+// Função auxiliar para obter o S3Client e bucket name
 function getBucketAndPath() {
-  const storage = getStorage()
-  const bucketName = process.env.GCS_BUCKET_NAME
+  const s3Client = getS3Client()
+  const bucketName = process.env.R2_BUCKET_NAME
   if (!bucketName) {
-    throw new Error("GCS_BUCKET_NAME não configurado")
+    throw new Error("R2_BUCKET_NAME não configurado")
   }
-  const bucket = storage.bucket(bucketName)
-  return { bucket, bucketName }
+  return { s3Client, bucketName }
 }
 
-// Função auxiliar para construir o caminho completo no GCS
-function getGcsPath(dir: string, filename?: string): string {
+// Função auxiliar para construir o caminho completo no R2
+function getR2Path(dir: string, filename?: string): string {
   const basePrefix = "public/files/"
   
   // Limpar o diretório: remover "files/" do início se existir
@@ -88,6 +79,30 @@ function normalize(str: string) {
     .toLowerCase()
 }
 
+// Função auxiliar para listar objetos do R2 com paginação
+async function listAllObjects(s3Client: S3Client, bucketName: string, prefix: string): Promise<Array<{ Key: string }>> {
+  const allObjects: Array<{ Key: string }> = []
+  let continuationToken: string | undefined = undefined
+
+  do {
+    const command = new ListObjectsV2Command({
+      Bucket: bucketName,
+      Prefix: prefix,
+      ContinuationToken: continuationToken,
+    })
+
+    const response = await s3Client.send(command)
+    
+    if (response.Contents) {
+      allObjects.push(...response.Contents.map(obj => ({ Key: obj.Key! })))
+    }
+
+    continuationToken = response.NextContinuationToken
+  } while (continuationToken)
+
+  return allObjects
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -97,27 +112,18 @@ export async function GET(request: Request) {
     const limit = parseInt(searchParams.get("limit") || "50", 10)
     const all = searchParams.get("all") === "true"
 
-    // Inicializar GCS
-    const storage = getStorage()
-    const bucketName = process.env.GCS_BUCKET_NAME
-    if (!bucketName) {
-      throw new Error("GCS_BUCKET_NAME não configurado")
-    }
+    // Inicializar R2
+    const { s3Client, bucketName } = getBucketAndPath()
     
     // Debug logs para verificar configuração
-    const isCloudRun = process.env.K_SERVICE || process.env.K_REVISION || process.env.PORT
     console.log('🔍 Environment:', process.env.NODE_ENV || 'development')
-    console.log('🔍 Is Cloud Run:', !!isCloudRun)
     console.log('🔍 Bucket Name:', bucketName)
-    console.log('🔍 Project ID:', process.env.GCS_PROJECT_ID)
-    
-    const bucket = storage.bucket(bucketName)
     
     // Construir prefixo baseado no diretório
     const basePrefix = "public/files/"
     const searchPrefix = dir ? `${basePrefix}${dir}/` : basePrefix
 
-    // Verificar cache antes de buscar do GCS
+    // Verificar cache antes de buscar do R2
     const cacheKey = generateCacheKey(searchPrefix, dir, search, page, limit, all)
     const cachedData = getFromCache(cacheKey)
     
@@ -132,21 +138,23 @@ export async function GET(request: Request) {
     }
 
     // Listar arquivos do bucket
-    const [files] = await bucket.getFiles({ prefix: searchPrefix })
+    const objects = await listAllObjects(s3Client, bucketName, searchPrefix)
     
     // Agrupar arquivos por categoria (pasta)
     const categoriesMap = new Map<string, any[]>()
     const foldersSet = new Set<string>() // Para detectar pastas vazias (com apenas .folder)
-    const filesToProcess: Array<{ file: any; category: string; fileName: string }> = []
+    const filesToProcess: Array<{ key: string; category: string; fileName: string }> = []
     
     // Primeiro passo: processar arquivos e coletar os que precisam de signed URLs
-    for (const file of files) {
+    for (const obj of objects) {
+      const key = obj.Key
+      
       // Ignorar arquivos .folder (marcadores de pasta vazia)
-      if (file.name.endsWith('.folder')) {
+      if (key.endsWith('.folder')) {
         // Extrair o nome da pasta do arquivo .folder
         // Exemplo: public/files/CATEGORIA/.folder -> CATEGORIA
         // Exemplo: public/files/DIR/SUBPASTA/.folder -> SUBPASTA (quando dir=DIR)
-        const pathParts = file.name.replace(basePrefix, '').split('/').filter(p => p && p !== '.folder')
+        const pathParts = key.replace(basePrefix, '').split('/').filter(p => p && p !== '.folder')
         if (pathParts.length > 0) {
           const folderName = pathParts[pathParts.length - 1]
           
@@ -172,10 +180,10 @@ export async function GET(request: Request) {
       }
       
       // Pular se não for uma imagem
-      if (!/\.(jpg|jpeg|png|webp)$/i.test(file.name)) continue
+      if (!/\.(jpg|jpeg|png|webp)$/i.test(key)) continue
       
       // Extrair categoria do caminho: public/files/CATEGORIA/imagem.jpg
-      const pathParts = file.name.split('/')
+      const pathParts = key.split('/')
       if (pathParts.length < 3) continue // Deve ter pelo menos public/files/categoria/imagem
       
       // Determinar qual é a categoria baseado no contexto
@@ -189,7 +197,7 @@ export async function GET(request: Request) {
       } else {
         // Dentro de um diretório: precisamos verificar se está no nível correto
         const dirParts = dir.split('/').filter(p => p)
-        const filePathParts = file.name.replace(basePrefix, '').split('/').filter(p => p)
+        const filePathParts = key.replace(basePrefix, '').split('/').filter(p => p)
         
         // Se o arquivo está diretamente no diretório especificado (não em subpasta)
         if (filePathParts.length === dirParts.length + 1) {
@@ -222,11 +230,11 @@ export async function GET(request: Request) {
       }
       
       // Coletar arquivo para processar signed URLs depois
-      filesToProcess.push({ file, category, fileName })
+      filesToProcess.push({ key, category, fileName })
     }
     
     // Segundo passo: gerar todas as signed URLs em paralelo
-    const signedUrlPromises = filesToProcess.map(({ file }) => getSignedUrl(file, bucketName))
+    const signedUrlPromises = filesToProcess.map(({ key }) => getSignedUrlForR2(s3Client, bucketName, key))
     const signedUrls = await Promise.all(signedUrlPromises)
     
     // Terceiro passo: adicionar arquivos com signed URLs ao mapa de categorias
@@ -269,16 +277,16 @@ export async function GET(request: Request) {
     let currentDirImages: any[] = []
     if (dir) {
       // Se estamos em um diretório específico, listar imagens diretas desse diretório
-      const directFiles = files.filter(file => {
-        const pathParts = file.name.split('/')
-        return pathParts.length === 3 && pathParts[2] === dir && /\.(jpg|jpeg|png|webp)$/i.test(file.name)
+      const directFiles = objects.filter(obj => {
+        const pathParts = obj.Key.split('/')
+        return pathParts.length === 3 && pathParts[2] === dir && /\.(jpg|jpeg|png|webp)$/i.test(obj.Key)
       })
       
       // Gerar signed URLs para imagens do diretório atual
       const imagesWithSignedUrls = await Promise.all(
-        directFiles.map(async (file) => {
-          const fileName = file.name.split('/').pop()!
-          const signedUrl = await getSignedUrl(file, bucketName)
+        directFiles.map(async (obj) => {
+          const fileName = obj.Key.split('/').pop()!
+          const signedUrl = await getSignedUrlForR2(s3Client, bucketName, obj.Key)
           return {
             name: fileName,
             code: path.parse(fileName).name,
@@ -328,7 +336,7 @@ export async function POST(request: Request) {
 
     console.log("API: Recebendo requisição POST", { action, dir })
 
-    const { bucket } = getBucketAndPath()
+    const { s3Client, bucketName } = getBucketAndPath()
 
     switch (action) {
       case "createFolder": {
@@ -346,42 +354,59 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: "Nome da pasta inválido" }, { status: 400 })
         }
 
-        // Construir o caminho completo da pasta no GCS
-        const folderGcsPath = getGcsPath(dir, sanitizedFolderName)
-        const folderGcsPathWithSlash = `${folderGcsPath}/`
+        // Construir o caminho completo da pasta no R2
+        const folderR2Path = getR2Path(dir, sanitizedFolderName)
+        const folderR2PathWithSlash = `${folderR2Path}/`
         
         // Verificar se já existe um arquivo com esse nome exato (sem extensão)
-        const file = bucket.file(folderGcsPath)
-        const [fileExists] = await file.exists()
-        
-        if (fileExists) {
-          console.error("API: Já existe um arquivo com esse nome", { folderGcsPath })
+        try {
+          const headCommand = new HeadObjectCommand({
+            Bucket: bucketName,
+            Key: folderR2Path,
+          })
+          await s3Client.send(headCommand)
+          
+          // Se chegou aqui, o arquivo existe
+          console.error("API: Já existe um arquivo com esse nome", { folderR2Path })
           return NextResponse.json({ error: "Já existe um arquivo com esse nome" }, { status: 400 })
+        } catch (error: any) {
+          // Se não encontrou (404), continua
+          if (error.name !== 'NotFound' && error.$metadata?.httpStatusCode !== 404) {
+            throw error
+          }
         }
         
-        // No GCS, pastas são implícitas através de prefixos
+        // No R2, pastas são implícitas através de prefixos
         // Verificar se já existem arquivos com esse prefixo (pasta já existe)
-        const [existingFiles] = await bucket.getFiles({ prefix: folderGcsPathWithSlash, maxResults: 1 })
+        const listCommand = new ListObjectsV2Command({
+          Bucket: bucketName,
+          Prefix: folderR2PathWithSlash,
+          MaxKeys: 1,
+        })
         
-        if (existingFiles.length > 0) {
-          console.error("API: Pasta já existe (já contém arquivos)", { folderGcsPathWithSlash })
+        const listResponse = await s3Client.send(listCommand)
+        
+        if (listResponse.Contents && listResponse.Contents.length > 0) {
+          console.error("API: Pasta já existe (já contém arquivos)", { folderR2PathWithSlash })
           return NextResponse.json({ error: "Pasta já existe" }, { status: 400 })
         }
 
-        // No GCS, precisamos criar um arquivo placeholder para que a pasta apareça nas listagens
+        // No R2, precisamos criar um arquivo placeholder para que a pasta apareça nas listagens
         // Criamos um arquivo marcador vazio dentro da pasta
-        const placeholderPath = `${folderGcsPathWithSlash}.folder`
-        const placeholderFile = bucket.file(placeholderPath)
+        const placeholderPath = `${folderR2PathWithSlash}.folder`
         
         try {
           // Criar arquivo placeholder vazio
-          await placeholderFile.save("", {
-            metadata: {
-              contentType: "application/x-directory",
-            },
+          const putCommand = new PutObjectCommand({
+            Bucket: bucketName,
+            Key: placeholderPath,
+            Body: "",
+            ContentType: "application/x-directory",
           })
           
-          console.log("API: Pasta criada com sucesso", { folderGcsPathWithSlash, placeholderPath })
+          await s3Client.send(putCommand)
+          
+          console.log("API: Pasta criada com sucesso", { folderR2PathWithSlash, placeholderPath })
           
           // Invalidar cache relacionado ao diretório
           const basePrefix = "public/files/"
@@ -390,7 +415,7 @@ export async function POST(request: Request) {
           
           return NextResponse.json({ message: "Pasta criada com sucesso" })
         } catch (createError) {
-          console.error("API: Erro ao criar pasta no GCS", { error: createError, placeholderPath })
+          console.error("API: Erro ao criar pasta no R2", { error: createError, placeholderPath })
           throw new Error(`Erro ao criar pasta: ${createError instanceof Error ? createError.message : "Erro desconhecido"}`)
         }
       }
@@ -407,9 +432,9 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: "Nome do arquivo inválido" }, { status: 400 })
         }
 
-        // Construir o caminho completo no GCS
-        const gcsFilePath = getGcsPath(dir, sanitizedFileName)
-        console.log("API: Fazendo upload para GCS", { gcsFilePath })
+        // Construir o caminho completo no R2
+        const r2FilePath = getR2Path(dir, sanitizedFileName)
+        console.log("API: Fazendo upload para R2", { r2FilePath })
 
         // Converter File para Buffer
         const bytes = await file.arrayBuffer()
@@ -464,15 +489,17 @@ export async function POST(request: Request) {
           }
         }
 
-        // Fazer upload para o GCS
-        const gcsFile = bucket.file(gcsFilePath)
-        await gcsFile.save(buffer, {
-          metadata: {
-            contentType: contentType,
-          },
+        // Fazer upload para o R2
+        const putCommand = new PutObjectCommand({
+          Bucket: bucketName,
+          Key: r2FilePath,
+          Body: buffer,
+          ContentType: contentType,
         })
+        
+        await s3Client.send(putCommand)
 
-        console.log("API: Arquivo enviado com sucesso para GCS", { gcsFilePath })
+        console.log("API: Arquivo enviado com sucesso para R2", { r2FilePath })
         
         // Invalidar cache relacionado ao diretório
         const basePrefix = "public/files/"
@@ -507,7 +534,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Nome do item não especificado" }, { status: 400 })
     }
 
-    const { bucket } = getBucketAndPath()
+    const { s3Client, bucketName } = getBucketAndPath()
 
     // Sanitizar o caminho do item
     const sanitizedItemPath = sanitizeName(itemPath)
@@ -515,23 +542,32 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Caminho do item inválido" }, { status: 400 })
     }
 
-    // Construir o caminho completo no GCS
+    // Construir o caminho completo no R2
     // Se dir está vazio, itemPath é o caminho direto da raiz
     // Se dir tem valor, itemPath é relativo ao dir
-    const gcsPathAsFile = getGcsPath(dir, sanitizedItemPath)
-    const gcsPathAsFolder = `${gcsPathAsFile}/`
+    const r2PathAsFile = getR2Path(dir, sanitizedItemPath)
+    const r2PathAsFolder = `${r2PathAsFile}/`
 
-    console.log("API: Caminhos GCS construídos", { gcsPathAsFile, gcsPathAsFolder })
+    console.log("API: Caminhos R2 construídos", { r2PathAsFile, r2PathAsFolder })
 
     // Primeiro, verificar se é um arquivo específico
-    const file = bucket.file(gcsPathAsFile)
-    const [fileExists] = await file.exists()
-
-    if (fileExists) {
+    try {
+      const headCommand = new HeadObjectCommand({
+        Bucket: bucketName,
+        Key: r2PathAsFile,
+      })
+      
+      await s3Client.send(headCommand)
+      
       // É um arquivo específico
-      console.log("API: Excluindo arquivo", { gcsPathAsFile })
+      console.log("API: Excluindo arquivo", { r2PathAsFile })
       try {
-        await file.delete()
+        const deleteCommand = new DeleteObjectCommand({
+          Bucket: bucketName,
+          Key: r2PathAsFile,
+        })
+        
+        await s3Client.send(deleteCommand)
         console.log("API: Arquivo excluído com sucesso")
         
         // Invalidar cache relacionado ao diretório
@@ -541,7 +577,7 @@ export async function DELETE(request: Request) {
         
         return NextResponse.json({ message: "Arquivo excluído com sucesso" })
       } catch (deleteError) {
-        console.error("API: Erro ao excluir arquivo", { error: deleteError, gcsPathAsFile })
+        console.error("API: Erro ao excluir arquivo", { error: deleteError, r2PathAsFile })
         return NextResponse.json(
           { 
             error: "Erro ao excluir arquivo", 
@@ -550,20 +586,39 @@ export async function DELETE(request: Request) {
           { status: 500 }
         )
       }
+    } catch (headError: any) {
+      // Se não encontrou o arquivo, verificar se é uma pasta
+      if (headError.name !== 'NotFound' && headError.$metadata?.httpStatusCode !== 404) {
+        throw headError
+      }
     }
 
     // Se não é arquivo, verificar se é uma pasta (tem arquivos com esse prefixo)
-    const [folderFiles] = await bucket.getFiles({ prefix: gcsPathAsFolder })
+    const listCommand = new ListObjectsV2Command({
+      Bucket: bucketName,
+      Prefix: r2PathAsFolder,
+    })
+    
+    const listResponse = await s3Client.send(listCommand)
+    const folderFiles = listResponse.Contents || []
     
     if (folderFiles.length === 0) {
-      console.error("API: Item não encontrado", { gcsPathAsFile, gcsPathAsFolder })
+      console.error("API: Item não encontrado", { r2PathAsFile, r2PathAsFolder })
       return NextResponse.json({ error: "Item não encontrado" }, { status: 404 })
     }
 
     // É uma pasta - deletar todos os arquivos com esse prefixo
-    console.log("API: Excluindo pasta com arquivos", { gcsPathAsFolder, count: folderFiles.length })
+    console.log("API: Excluindo pasta com arquivos", { r2PathAsFolder, count: folderFiles.length })
     try {
-      await Promise.all(folderFiles.map(file => file.delete()))
+      await Promise.all(
+        folderFiles.map(file => {
+          const deleteCommand = new DeleteObjectCommand({
+            Bucket: bucketName,
+            Key: file.Key!,
+          })
+          return s3Client.send(deleteCommand)
+        })
+      )
       console.log("API: Pasta excluída com sucesso", { count: folderFiles.length })
       
       // Invalidar cache relacionado ao diretório
@@ -573,7 +628,7 @@ export async function DELETE(request: Request) {
       
       return NextResponse.json({ message: "Pasta excluída com sucesso" })
     } catch (deleteError) {
-      console.error("API: Erro ao excluir pasta", { error: deleteError, gcsPathAsFolder })
+      console.error("API: Erro ao excluir pasta", { error: deleteError, r2PathAsFolder })
       return NextResponse.json(
         { 
           error: "Erro ao excluir pasta", 

@@ -2,27 +2,27 @@ import { NextResponse } from "next/server"
 import path from "path"
 import archiver from "archiver"
 import { PassThrough } from "stream"
-import { Storage } from '@google-cloud/storage'
+import { S3Client, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3'
 
-// Função para inicializar o Google Cloud Storage
-function getStorage() {
-  const isCloudRun = process.env.K_SERVICE || process.env.K_REVISION || process.env.PORT
-  if (isCloudRun) {
-    return new Storage({
-      projectId: process.env.GCS_PROJECT_ID,
-    })
+// Função para inicializar o S3Client para Cloudflare R2
+function getS3Client() {
+  const accountId = process.env.R2_ACCOUNT_ID
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY
+  
+  if (!accountId || !accessKeyId || !secretAccessKey) {
+    throw new Error("Credenciais R2 não configuradas")
   }
-  if (process.env.GCS_CLIENT_EMAIL && process.env.GCS_PRIVATE_KEY && process.env.GCS_PRIVATE_KEY.trim() !== '') {
-    return new Storage({
-      projectId: process.env.GCS_PROJECT_ID,
-      credentials: {
-        client_email: process.env.GCS_CLIENT_EMAIL,
-        private_key: process.env.GCS_PRIVATE_KEY.replace(/\\n/g, '\n'),
-      },
-    })
-  }
-  return new Storage({
-    projectId: process.env.GCS_PROJECT_ID,
+
+  const endpoint = process.env.R2_ENDPOINT || `https://${accountId}.r2.cloudflarestorage.com`
+
+  return new S3Client({
+    region: "auto",
+    endpoint: endpoint,
+    credentials: {
+      accessKeyId: accessKeyId,
+      secretAccessKey: secretAccessKey,
+    },
   })
 }
 
@@ -41,29 +41,47 @@ export async function POST(request: Request) {
       .slice(0, 80)
     const folderName = `${orderDate}_${sanitize(customerName)}_${sanitize(orderNumber)}`
 
-    // Buscar e baixar arquivos do GCS
-    const storage = getStorage()
-    const bucketName = process.env.GCS_BUCKET_NAME
+    // Buscar e baixar arquivos do R2
+    const s3Client = getS3Client()
+    const bucketName = process.env.R2_BUCKET_NAME
     if (!bucketName) {
-      throw new Error("GCS_BUCKET_NAME não configurado")
+      throw new Error("R2_BUCKET_NAME não configurado")
     }
-    
-    const bucket = storage.bucket(bucketName)
 
     // Listar arquivos do bucket com prefixo public/files/ e limite de 5000
-    const [files] = await bucket.getFiles({ 
-      prefix: 'public/files/',
-      maxResults: 5000
-    })
-    
+    const allObjects: Array<{ Key: string }> = []
+    let continuationToken: string | undefined = undefined
+    const maxResults = 5000
+
+    do {
+      const command: ListObjectsV2Command = new ListObjectsV2Command({
+        Bucket: bucketName,
+        Prefix: 'public/files/',
+        MaxKeys: maxResults,
+        ContinuationToken: continuationToken,
+      })
+
+      const response = await s3Client.send(command)
+      
+      if (response.Contents) {
+        allObjects.push(...response.Contents.map((obj: { Key?: string }) => ({ Key: obj.Key! })))
+      }
+
+      continuationToken = response.NextContinuationToken
+    } while (continuationToken && allObjects.length < maxResults)
+
     // Verificar se pode ter mais arquivos além do limite
-    if (files.length === 5000) {
+    if (allObjects.length === maxResults) {
       console.warn('⚠️ Limite de 5000 arquivos atingido na listagem. Alguns arquivos podem não estar disponíveis.')
     }
 
     // Filtrar apenas os arquivos selecionados por código (basename sem extensão)
     const wanted = new Set<string>(selectedImages || [])
-    const matches = files.filter((file) => wanted.has(path.parse(file.name).name))
+    const matches = allObjects.filter((obj) => {
+      const fileName = path.basename(obj.Key)
+      const code = path.parse(fileName).name
+      return wanted.has(code)
+    })
 
     if (matches.length === 0) {
       return NextResponse.json(
@@ -77,7 +95,8 @@ export async function POST(request: Request) {
     
     // Verificar se todos os arquivos solicitados foram encontrados
     if (matches.length < wanted.size) {
-      const missing = Array.from(wanted).filter(code => !matches.some(file => path.parse(file.name).name === code))
+      const foundCodes = new Set(matches.map(obj => path.parse(path.basename(obj.Key)).name))
+      const missing = Array.from(wanted).filter(code => !foundCodes.has(code))
       console.warn('⚠️ Alguns arquivos não foram encontrados:', missing)
     }
 
@@ -86,34 +105,56 @@ export async function POST(request: Request) {
     const pass = new PassThrough()
     archive.pipe(pass)
 
-    // Adicionar arquivos do GCS diretamente ao ZIP (sem subpastas) com resolução de nomes duplicados
-    const usedNames = new Map<string, number>()
-    const getUniqueName = (baseName: string) => {
-      if (!usedNames.has(baseName)) {
-        usedNames.set(baseName, 1)
-        return baseName
-      }
-      const count = (usedNames.get(baseName) || 1) + 1
-      usedNames.set(baseName, count)
-      const ext = path.extname(baseName)
-      const nameOnly = baseName.slice(0, baseName.length - ext.length)
-      return `${nameOnly} (${count})${ext}`
-    }
+    // Adicionar arquivos do R2 diretamente ao ZIP (sem subpastas) ignorando duplicatas
+    const usedNames = new Set<string>()
+    const warnings: string[] = []
 
-    for (const file of matches) {
-      const flatName = path.basename(file.name) // remove subpastas, mantém extensão
-      const entryName = getUniqueName(flatName)
-      archive.append(file.createReadStream(), { name: entryName })
+    // Processar arquivos e adicionar ao ZIP
+    for (const obj of matches) {
+      const flatName = path.basename(obj.Key) // remove subpastas, mantém extensão
+      if (usedNames.has(flatName)) {
+        warnings.push(`⚠️ Existiam 2 arquivos com mesmo nome + ${flatName}. O segundo arquivo foi removido da lista.`)
+        continue
+      }
+      usedNames.add(flatName)
+      
+      // Obter objeto do R2
+      const getCommand = new GetObjectCommand({
+        Bucket: bucketName,
+        Key: obj.Key,
+      })
+      
+      const response = await s3Client.send(getCommand)
+      
+      if (response.Body) {
+        // O Body do AWS SDK v3 é um stream nativo do Node.js
+        // Converter para Buffer para compatibilidade com archiver
+        const stream = response.Body as any
+        const chunks: Buffer[] = []
+        
+        for await (const chunk of stream) {
+          chunks.push(Buffer.from(chunk))
+        }
+        
+        const buffer = Buffer.concat(chunks)
+        archive.append(buffer, { name: flatName })
+      }
     }
 
     // Finalizar o ZIP (começa a ser enviado conforme é gerado)
     archive.finalize()
+
+    // Preparar header de aviso somente com caracteres ASCII (usar URL encoding)
+    const warningHeaderValue = warnings.length > 0
+      ? warnings.map((w) => encodeURIComponent(w)).join(' | ')
+      : undefined
 
     return new NextResponse(pass as any, {
       headers: {
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="${folderName}.zip"`,
         'Cache-Control': 'no-store',
+        ...(warningHeaderValue ? { 'X-Warning': warningHeaderValue } : {}),
       },
     })
   } catch (error) {
@@ -126,4 +167,4 @@ export async function POST(request: Request) {
       { status: 500 }
     )
   }
-} 
+}
