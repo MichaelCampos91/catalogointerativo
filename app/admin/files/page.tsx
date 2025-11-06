@@ -90,28 +90,77 @@ export default function FilesPage() {
     }
   }
 
-  const loadFiles = async () => {
+  const loadFiles = async (forceReload: boolean = false) => {
     try {
+      // console.log('📂 [Frontend] Iniciando carregamento de arquivos...', { currentDir, forceReload })
       setLoading(true)
       setError(null)
 
       // Remover "files" do início do caminho se existir
       const cleanDir = currentDir.startsWith("files/") ? currentDir.slice(6) : currentDir
+      let url = `/api/files?dir=${encodeURIComponent(cleanDir)}&all=true`
       
-      const response = await fetch(`/api/files?dir=${encodeURIComponent(cleanDir)}&all=true`)
+      // Adicionar timestamp para cache-busting se forceReload for true
+      if (forceReload) {
+        url += `&_t=${Date.now()}`
+        // console.log('🔄 [Frontend] Forçando bypass do cache do navegador')
+      }
+      
+      // console.log('📤 [Frontend] Fazendo requisição:', { url, cleanDir, currentDir, forceReload })
+      const startTime = Date.now()
+      
+      // Usar cache: 'no-store' se forceReload for true para forçar bypass do cache do navegador
+      const fetchOptions: RequestInit = forceReload 
+        ? { 
+            cache: 'no-store',
+            headers: {
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache',
+              'Expires': '0'
+            }
+          }
+        : {}
+      
+      const response = await fetch(url, fetchOptions)
+
+      const elapsedTime = Date.now() - startTime
+      // console.log(`⏱️ [Frontend] Resposta recebida em ${elapsedTime}ms:`, {
+      //   status: response.status,
+      //   statusText: response.statusText,
+      //   ok: response.ok,
+      //   headers: Object.fromEntries(response.headers.entries())
+      // })
 
       if (!response.ok) {
         const errorData = await response.json()
+        // console.error('❌ [Frontend] Erro na resposta:', {
+        //   status: response.status,
+        //   statusText: response.statusText,
+        //   errorData
+        // })
         throw new Error(`Erro ao carregar arquivos: ${errorData.message || response.status}`)
       }
 
       const data = await response.json()
+      // console.log('✅ [Frontend] Dados recebidos com sucesso:', {
+      //   categoriesCount: data.categories?.length || 0,
+      //   imagesCount: data.images?.length || 0,
+      //   pagination: data.pagination,
+      //   sampleCategories: data.categories?.slice(0, 3).map((c: Category) => ({ name: c.name, imagesCount: c.images?.length || 0 })),
+      //   sampleImages: data.images?.slice(0, 3).map((img: any) => ({ name: img.name, url: img.url?.substring(0, 50) + '...' }))
+      // })
       setFiles(data)
     } catch (error) {
-      console.error("Erro ao carregar arquivos:", error)
+      // console.error("❌ [Frontend] Erro ao carregar arquivos:", {
+      //   error,
+      //   message: error instanceof Error ? error.message : "Erro desconhecido",
+      //   stack: error instanceof Error ? error.stack : undefined,
+      //   currentDir
+      // })
       setError(error instanceof Error ? error.message : "Erro desconhecido")
     } finally {
       setLoading(false)
+      // console.log('🏁 [Frontend] Carregamento de arquivos finalizado')
     }
   }
 
@@ -170,9 +219,9 @@ export default function FilesPage() {
       })
       setShowCreateFolder(false)
       setNewFolderName("")
-      loadFiles()
+      loadFiles(true) // Forçar bypass do cache após criar pasta
     } catch (error) {
-      console.error("Frontend: Erro ao criar pasta", error)
+      // console.error("Frontend: Erro ao criar pasta", error)
       toast({
         title: "Erro",
         description: error instanceof Error ? error.message : "Erro ao criar pasta",
@@ -204,9 +253,9 @@ export default function FilesPage() {
         title: "Sucesso",
         description: `Pasta excluída com sucesso!`,
       })
-      loadFiles()
+      loadFiles(true) // Forçar bypass do cache após excluir pasta
     } catch (error) {
-      console.error("Frontend: Erro ao excluir categoria", error)
+      // console.error("Frontend: Erro ao excluir categoria", error)
       toast({
         title: "Erro",
         description: error instanceof Error ? error.message : `Erro ao excluir pasta`,
@@ -228,7 +277,19 @@ export default function FilesPage() {
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files
-    if (!files || files.length === 0) return
+    if (!files || files.length === 0) {
+      // console.log('⚠️ [Frontend] Nenhum arquivo selecionado')
+      return
+    }
+
+    const file = files[0]
+    // console.log('📤 [Frontend] Iniciando upload de arquivo:', {
+    //   name: file.name,
+    //   size: file.size,
+    //   type: file.type,
+    //   lastModified: new Date(file.lastModified).toISOString(),
+    //   currentDir
+    // })
 
     try {
       setLoading(true)
@@ -237,25 +298,69 @@ export default function FilesPage() {
       // Remover "files/" do início do caminho se existir
       const cleanDir = currentDir.startsWith("files/") ? currentDir.slice(6) : currentDir
       formData.append("dir", cleanDir)
-      formData.append("file", files[0])
+      formData.append("file", file)
 
+      // console.log('📋 [Frontend] FormData preparado:', {
+      //   action: "upload",
+      //   dir: cleanDir,
+      //   fileName: file.name,
+      //   fileSize: file.size,
+      //   fileType: file.type
+      // })
+
+      const startTime = Date.now()
       const response = await fetch("/api/files", {
         method: "POST",
         body: formData,
       })
 
+      const elapsedTime = Date.now() - startTime
+      // console.log(`⏱️ [Frontend] Resposta do upload recebida em ${elapsedTime}ms:`, {
+      //   status: response.status,
+      //   statusText: response.statusText,
+      //   ok: response.ok,
+      //   headers: Object.fromEntries(response.headers.entries())
+      // })
+
       if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.message || "Erro ao fazer upload do arquivo")
+        let errorData
+        try {
+          errorData = await response.json()
+        } catch (e) {
+          const text = await response.text()
+          errorData = { message: text || `Erro HTTP ${response.status}` }
+        }
+        // console.error('❌ [Frontend] Erro no upload:', {
+        //   status: response.status,
+        //   statusText: response.statusText,
+        //   errorData,
+        //   fileName: file.name
+        // })
+        throw new Error(errorData.message || errorData.error || "Erro ao fazer upload do arquivo")
       }
+
+      const data = await response.json()
+      // console.log('✅ [Frontend] Upload concluído com sucesso:', {
+      //   data,
+      //   fileName: file.name,
+      //   totalTime: elapsedTime
+      // })
 
       toast({
         title: "Sucesso",
         description: "Arquivo enviado com sucesso",
       })
-      loadFiles()
+      loadFiles(true) // Forçar bypass do cache após upload
     } catch (error) {
-      console.error("Erro ao fazer upload:", error)
+      // console.error("❌ [Frontend] Erro ao fazer upload:", {
+      //   error,
+      //   message: error instanceof Error ? error.message : "Erro desconhecido",
+      //   stack: error instanceof Error ? error.stack : undefined,
+      //   fileName: file.name,
+      //   fileSize: file.size,
+      //   fileType: file.type,
+      //   currentDir
+      // })
       toast({
         title: "Erro",
         description: error instanceof Error ? error.message : "Erro ao fazer upload do arquivo",
@@ -266,6 +371,7 @@ export default function FilesPage() {
       if (fileInputRef.current) {
         fileInputRef.current.value = ""
       }
+      // console.log('🏁 [Frontend] Processo de upload finalizado')
     }
   }
 
@@ -298,7 +404,7 @@ export default function FilesPage() {
         title: "Sucesso",
         description: `Imagem excluída com sucesso!`
       });
-      loadFiles();
+      loadFiles(true); // Forçar bypass do cache após excluir imagem
     } catch (error) {
       toast({
         title: "Erro",
@@ -364,7 +470,7 @@ export default function FilesPage() {
               <FolderPlus className="w-4 h-4 mr-2" />
               Add Pasta
             </Button>
-            <Button variant="outline" onClick={loadFiles}>
+            <Button variant="outline" onClick={() => loadFiles()}>
               <RefreshCw className="w-4 h-4 mr-2" />
               Atualizar
             </Button>
@@ -463,7 +569,7 @@ export default function FilesPage() {
               </div>
               <h2 className="text-xl font-bold mb-2">Erro ao Carregar Arquivos</h2>
               <p className="text-gray-600 mb-4">{error}</p>
-              <Button onClick={loadFiles}>Tentar Novamente</Button>
+              <Button onClick={() => loadFiles()}>Tentar Novamente</Button>
             </CardContent>
           </Card>
         )}

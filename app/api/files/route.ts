@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import path from "path"
-import { S3Client, ListObjectsV2Command, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, ListObjectsV2Command, ListObjectsV2CommandOutput, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
 import sharp from 'sharp'
 import { getFromCache, setCache, generateCacheKey, invalidateCache, getSignedUrlForR2 } from '@/lib/r2-cache'
 
@@ -10,30 +10,62 @@ function getS3Client() {
   const accessKeyId = process.env.R2_ACCESS_KEY_ID
   const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY
   
-  if (!accountId || !accessKeyId || !secretAccessKey) {
-    throw new Error("Credenciais R2 não configuradas")
+  // Validação detalhada de credenciais
+  const missingCredentials: string[] = []
+  if (!accountId) missingCredentials.push("R2_ACCOUNT_ID")
+  if (!accessKeyId) missingCredentials.push("R2_ACCESS_KEY_ID")
+  if (!secretAccessKey) missingCredentials.push("R2_SECRET_ACCESS_KEY")
+  
+  if (missingCredentials.length > 0) {
+    const errorMsg = `Credenciais R2 não configuradas: ${missingCredentials.join(", ")}`
+    // console.error("❌ [Backend]", errorMsg)
+    throw new Error(errorMsg)
   }
 
   const endpoint = process.env.R2_ENDPOINT || `https://${accountId}.r2.cloudflarestorage.com`
+  
+  // console.log('✅ [Backend] Credenciais R2 validadas:', {
+  //   accountId: accountId.substring(0, 8) + '...',
+  //   endpoint,
+  //   hasCustomEndpoint: !!process.env.R2_ENDPOINT
+  // })
 
+  // Como já validamos que não são undefined, podemos garantir que são strings
   return new S3Client({
     region: "auto",
     endpoint: endpoint,
     credentials: {
-      accessKeyId: accessKeyId,
-      secretAccessKey: secretAccessKey,
+      accessKeyId: accessKeyId as string,
+      secretAccessKey: secretAccessKey as string,
     },
   })
 }
 
 // Função auxiliar para obter o S3Client e bucket name
 function getBucketAndPath() {
-  const s3Client = getS3Client()
-  const bucketName = process.env.R2_BUCKET_NAME
-  if (!bucketName) {
-    throw new Error("R2_BUCKET_NAME não configurado")
+  try {
+    const s3Client = getS3Client()
+    const bucketName = process.env.R2_BUCKET_NAME
+    
+    if (!bucketName) {
+      const errorMsg = "R2_BUCKET_NAME não configurado"
+      // console.error("❌ [Backend]", errorMsg)
+      throw new Error(errorMsg)
+    }
+    
+    // console.log('✅ [Backend] Bucket R2 configurado:', {
+    //   bucketName,
+    //   timestamp: new Date().toISOString()
+    // })
+    
+    return { s3Client, bucketName }
+  } catch (error) {
+    // console.error("❌ [Backend] Erro ao obter configuração R2:", {
+    //   error,
+    //   message: error instanceof Error ? error.message : "Erro desconhecido"
+    // })
+    throw error
   }
-  return { s3Client, bucketName }
 }
 
 // Função auxiliar para construir o caminho completo no R2
@@ -79,27 +111,99 @@ function normalize(str: string) {
     .toLowerCase()
 }
 
+// Função auxiliar para invalidar cache de múltiplos níveis
+// Invalida o cache do diretório atual, do diretório pai (se houver) e da raiz
+function invalidateCacheForDir(dir: string) {
+  const basePrefix = "public/files/"
+  
+  // Limpar o diretório: remover "files/" do início se existir
+  const cleanDir = dir.startsWith("files/") ? dir.slice(6) : dir
+  
+  const prefixesToInvalidate: string[] = []
+  
+  // 1. Invalidar cache do diretório atual
+  if (cleanDir) {
+    const currentDirPrefix = `${basePrefix}${cleanDir}/`
+    prefixesToInvalidate.push(currentDirPrefix)
+    // console.log('🗑️ [Backend] Invalidando cache do diretório atual:', currentDirPrefix)
+  }
+  
+  // 2. Invalidar cache do diretório pai (se houver)
+  if (cleanDir) {
+    const dirParts = cleanDir.split('/').filter(p => p)
+    if (dirParts.length > 1) {
+      // Tem diretório pai
+      const parentDir = dirParts.slice(0, -1).join('/')
+      const parentDirPrefix = `${basePrefix}${parentDir}/`
+      prefixesToInvalidate.push(parentDirPrefix)
+      // console.log('🗑️ [Backend] Invalidando cache do diretório pai:', parentDirPrefix)
+    }
+  }
+  
+  // 3. Sempre invalidar cache da raiz para garantir consistência
+  prefixesToInvalidate.push(basePrefix)
+  // console.log('🗑️ [Backend] Invalidando cache da raiz:', basePrefix)
+  
+  // Invalidar todos os prefixos
+  // console.log(`🗑️ [Backend] Invalidando cache para ${prefixesToInvalidate.length} prefixo(s)`)
+  for (const prefix of prefixesToInvalidate) {
+    invalidateCache(prefix)
+    // console.log(`✅ [Backend] Cache invalidado para: "${prefix}"`)
+  }
+  
+  // console.log(`✅ [Backend] Invalidação de cache concluída para diretório: "${dir}"`)
+}
+
 // Função auxiliar para listar objetos do R2 com paginação
 async function listAllObjects(s3Client: S3Client, bucketName: string, prefix: string): Promise<Array<{ Key: string }>> {
   const allObjects: Array<{ Key: string }> = []
   let continuationToken: string | undefined = undefined
+  let attempt = 0
+  const maxAttempts = 3
 
   do {
-    const command = new ListObjectsV2Command({
-      Bucket: bucketName,
-      Prefix: prefix,
-      ContinuationToken: continuationToken,
-    })
+    try {
+      const command: ListObjectsV2Command = new ListObjectsV2Command({
+        Bucket: bucketName,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      })
 
-    const response = await s3Client.send(command)
-    
-    if (response.Contents) {
-      allObjects.push(...response.Contents.map(obj => ({ Key: obj.Key! })))
+      // console.log(`📋 [Backend] Listando objetos R2 (tentativa ${attempt + 1}/${maxAttempts}):`, {
+      //   bucket: bucketName,
+      //   prefix,
+      //   hasContinuationToken: !!continuationToken
+      // })
+
+      const response: ListObjectsV2CommandOutput = await s3Client.send(command)
+      
+      if (response.Contents) {
+        allObjects.push(...response.Contents.map((obj: { Key?: string }) => ({ Key: obj.Key! })))
+        // console.log(`✅ [Backend] ${response.Contents.length} objetos encontrados nesta página`)
+      }
+
+      continuationToken = response.NextContinuationToken
+      attempt = 0 // Reset attempt counter on success
+    } catch (error) {
+      attempt++
+      // console.error(`❌ [Backend] Erro ao listar objetos R2 (tentativa ${attempt}/${maxAttempts}):`, {
+      //   error,
+      //   message: error instanceof Error ? error.message : "Erro desconhecido",
+      //   prefix,
+      //   bucket: bucketName
+      // })
+      
+      if (attempt >= maxAttempts) {
+        // console.error("❌ [Backend] Número máximo de tentativas excedido ao listar objetos R2")
+        throw new Error(`Erro ao listar objetos do R2 após ${maxAttempts} tentativas: ${error instanceof Error ? error.message : "Erro desconhecido"}`)
+      }
+      
+      // Aguardar antes de tentar novamente (exponential backoff simples)
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
     }
-
-    continuationToken = response.NextContinuationToken
   } while (continuationToken)
 
+  // console.log(`✅ [Backend] Total de objetos listados: ${allObjects.length}`)
   return allObjects
 }
 
@@ -111,24 +215,26 @@ export async function GET(request: Request) {
     const page = parseInt(searchParams.get("page") || "1", 10)
     const limit = parseInt(searchParams.get("limit") || "50", 10)
     const all = searchParams.get("all") === "true"
+    const forceReload = searchParams.has("_t") // Verificar se há parâmetro de cache-busting
 
     // Inicializar R2
     const { s3Client, bucketName } = getBucketAndPath()
     
     // Debug logs para verificar configuração
-    console.log('🔍 Environment:', process.env.NODE_ENV || 'development')
-    console.log('🔍 Bucket Name:', bucketName)
+    // console.log('🔍 Environment:', process.env.NODE_ENV || 'development')
+    // console.log('🔍 Bucket Name:', bucketName)
+    // console.log('🔍 Force Reload:', forceReload)
     
     // Construir prefixo baseado no diretório
     const basePrefix = "public/files/"
     const searchPrefix = dir ? `${basePrefix}${dir}/` : basePrefix
 
-    // Verificar cache antes de buscar do R2
+    // Verificar cache antes de buscar do R2 (mas ignorar se forceReload for true)
     const cacheKey = generateCacheKey(searchPrefix, dir, search, page, limit, all)
-    const cachedData = getFromCache(cacheKey)
+    const cachedData = !forceReload ? getFromCache(cacheKey) : null
     
     if (cachedData) {
-      console.log('✅ Retornando dados do cache:', cacheKey)
+      // console.log('✅ Retornando dados do cache:', cacheKey)
       return NextResponse.json(cachedData, {
         headers: {
           'Cache-Control': 'public, max-age=900',
@@ -276,17 +382,53 @@ export async function GET(request: Request) {
     // Listar imagens do diretório atual (não das subpastas) - para compatibilidade
     let currentDirImages: any[] = []
     if (dir) {
-      // Se estamos em um diretório específico, listar imagens diretas desse diretório
+      // Construir o prefixo correto para o diretório atual
+      // Exemplo: se dir = "AAAA", prefixo = "public/files/AAAA/"
+      // Exemplo: se dir = "AAAA/BBBB", prefixo = "public/files/AAAA/BBBB/"
+      const cleanDir = dir.startsWith("files/") ? dir.slice(6) : dir
+      const dirPrefix = `${basePrefix}${cleanDir}/`
+      
+      // console.log('🔍 Listando imagens do diretório atual:', { dir, cleanDir, dirPrefix })
+      
+      // Filtrar arquivos que:
+      // 1. Começam com o prefixo do diretório
+      // 2. São imagens (jpg, jpeg, png, webp)
+      // 3. Estão diretamente no diretório (não em subpastas)
+      //    Ou seja: o caminho após o prefixo não contém mais "/"
       const directFiles = objects.filter(obj => {
-        const pathParts = obj.Key.split('/')
-        return pathParts.length === 3 && pathParts[2] === dir && /\.(jpg|jpeg|png|webp)$/i.test(obj.Key)
+        const key = obj.Key
+        
+        // Deve começar com o prefixo do diretório
+        if (!key.startsWith(dirPrefix)) {
+          return false
+        }
+        
+        // Deve ser uma imagem
+        if (!/\.(jpg|jpeg|png|webp)$/i.test(key)) {
+          return false
+        }
+        
+        // Ignorar arquivos .folder
+        if (key.endsWith('.folder')) {
+          return false
+        }
+        
+        // Verificar se está diretamente no diretório (não em subpasta)
+        // Remover o prefixo e verificar se não há mais "/"
+        const relativePath = key.replace(dirPrefix, '')
+        const isDirectFile = !relativePath.includes('/')
+        
+        return isDirectFile
       })
+      
+      // console.log(`✅ Encontradas ${directFiles.length} imagens diretas no diretório ${dir}`)
       
       // Gerar signed URLs para imagens do diretório atual
       const imagesWithSignedUrls = await Promise.all(
         directFiles.map(async (obj) => {
           const fileName = obj.Key.split('/').pop()!
           const signedUrl = await getSignedUrlForR2(s3Client, bucketName, obj.Key)
+          // console.log(`📷 Gerando signed URL para: ${fileName} -> ${signedUrl.substring(0, 50)}...`)
           return {
             name: fileName,
             code: path.parse(fileName).name,
@@ -296,6 +438,7 @@ export async function GET(request: Request) {
         })
       )
       currentDirImages = imagesWithSignedUrls
+      // console.log(`✅ Total de imagens processadas: ${currentDirImages.length}`)
     }
 
     const responseData = {
@@ -309,20 +452,66 @@ export async function GET(request: Request) {
       }
     }
 
-    // Armazenar no cache
-    setCache(cacheKey, responseData)
+    // Armazenar no cache apenas se não for forceReload
+    if (!forceReload) {
+      setCache(cacheKey, responseData)
+    } else {
+      // console.log('🔄 [Backend] Force reload detectado, não armazenando no cache do servidor')
+    }
+
+    // Ajustar headers de cache baseado em forceReload
+    const cacheHeaders: Record<string, string> = forceReload
+      ? {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+          'X-Cache': 'MISS-FORCED'
+        }
+      : {
+          'Cache-Control': 'public, max-age=60', // Cache mais curto para dados novos
+          'X-Cache': 'MISS'
+        }
 
     return NextResponse.json(responseData, {
-      headers: {
-        'Cache-Control': 'public, max-age=900',
-        'X-Cache': 'MISS'
-      }
+      headers: cacheHeaders
     })
   } catch (error) {
-    console.error("Erro ao listar arquivos:", error)
+    // console.error("❌ [Backend] Erro ao listar arquivos:", {
+    //   error,
+    //   message: error instanceof Error ? error.message : "Erro desconhecido",
+    //   stack: error instanceof Error ? error.stack : undefined,
+    //   dir,
+    //   name: error instanceof Error ? error.name : typeof error
+    // })
+    
+    // Mensagens de erro mais descritivas
+    let errorMessage = "Erro ao listar arquivos"
+    let statusCode = 500
+    
+    if (error instanceof Error) {
+      // Erros relacionados a credenciais R2
+      if (error.message.includes("Credenciais") || error.message.includes("R2") || error.message.includes("não configurado")) {
+        errorMessage = "Erro de configuração do CloudFlare R2. Verifique as credenciais."
+        statusCode = 500
+      }
+      // Erros de rede/conexão
+      else if (error.message.includes("ECONNREFUSED") || error.message.includes("timeout") || error.message.includes("ENOTFOUND")) {
+        errorMessage = "Erro de conexão com o CloudFlare R2. Tente novamente."
+        statusCode = 503
+      }
+      // Outros erros
+      else {
+        errorMessage = error.message || "Erro desconhecido ao listar arquivos"
+      }
+    }
+    
     return NextResponse.json(
-      { error: "Erro ao listar arquivos", message: error instanceof Error ? error.message : "Erro desconhecido" },
-      { status: 500 }
+      { 
+        error: errorMessage,
+        message: errorMessage,
+        details: process.env.NODE_ENV === 'development' ? (error instanceof Error ? error.stack : String(error)) : undefined
+      },
+      { status: statusCode }
     )
   }
 }
@@ -334,17 +523,17 @@ export async function POST(request: Request) {
     const action = formData.get("action")
     const dir = (formData.get("dir") as string) || ""
 
-    console.log("API: Recebendo requisição POST", { action, dir })
+    // console.log("API: Recebendo requisição POST", { action, dir })
 
     const { s3Client, bucketName } = getBucketAndPath()
 
     switch (action) {
       case "createFolder": {
         const folderName = formData.get("folderName") as string
-        console.log("API: Criando pasta", { folderName, dir })
+        // console.log("API: Criando pasta", { folderName, dir })
 
         if (!folderName) {
-          console.error("API: Nome da pasta não especificado")
+          // console.error("API: Nome da pasta não especificado")
           return NextResponse.json({ error: "Nome da pasta não especificado" }, { status: 400 })
         }
 
@@ -367,7 +556,7 @@ export async function POST(request: Request) {
           await s3Client.send(headCommand)
           
           // Se chegou aqui, o arquivo existe
-          console.error("API: Já existe um arquivo com esse nome", { folderR2Path })
+          // console.error("API: Já existe um arquivo com esse nome", { folderR2Path })
           return NextResponse.json({ error: "Já existe um arquivo com esse nome" }, { status: 400 })
         } catch (error: any) {
           // Se não encontrou (404), continua
@@ -387,7 +576,7 @@ export async function POST(request: Request) {
         const listResponse = await s3Client.send(listCommand)
         
         if (listResponse.Contents && listResponse.Contents.length > 0) {
-          console.error("API: Pasta já existe (já contém arquivos)", { folderR2PathWithSlash })
+          // console.error("API: Pasta já existe (já contém arquivos)", { folderR2PathWithSlash })
           return NextResponse.json({ error: "Pasta já existe" }, { status: 400 })
         }
 
@@ -406,90 +595,157 @@ export async function POST(request: Request) {
           
           await s3Client.send(putCommand)
           
-          console.log("API: Pasta criada com sucesso", { folderR2PathWithSlash, placeholderPath })
+          // console.log("API: Pasta criada com sucesso", { folderR2PathWithSlash, placeholderPath })
           
-          // Invalidar cache relacionado ao diretório
-          const basePrefix = "public/files/"
-          const dirPrefix = dir ? `${basePrefix}${dir}/` : basePrefix
-          invalidateCache(dirPrefix)
+          // Invalidar cache relacionado ao diretório (atual, pai e raiz)
+          // console.log('🗑️ [Backend] Invalidando cache após criação de pasta')
+          invalidateCacheForDir(dir)
           
           return NextResponse.json({ message: "Pasta criada com sucesso" })
         } catch (createError) {
-          console.error("API: Erro ao criar pasta no R2", { error: createError, placeholderPath })
+          // console.error("API: Erro ao criar pasta no R2", { error: createError, placeholderPath })
           throw new Error(`Erro ao criar pasta: ${createError instanceof Error ? createError.message : "Erro desconhecido"}`)
         }
       }
 
       case "upload": {
+        // console.log('📤 [Backend] Iniciando processo de upload...', { dir, timestamp: new Date().toISOString() })
+        
         const file = formData.get("file") as File
         if (!file) {
+          // console.error('❌ [Backend] Arquivo não especificado na requisição')
           return NextResponse.json({ error: "Arquivo não especificado" }, { status: 400 })
         }
+
+        // console.log('📄 [Backend] Arquivo recebido:', {
+        //   name: file.name,
+        //   size: file.size,
+        //   type: file.type,
+        //   lastModified: new Date(file.lastModified).toISOString()
+        // })
 
         // Sanitizar o nome do arquivo
         const sanitizedFileName = sanitizeName(file.name)
         if (!sanitizedFileName) {
+          // console.error('❌ [Backend] Nome do arquivo inválido após sanitização:', {
+          //   originalName: file.name,
+          //   sanitized: sanitizedFileName
+          // })
           return NextResponse.json({ error: "Nome do arquivo inválido" }, { status: 400 })
         }
 
+        // console.log('✅ [Backend] Nome do arquivo sanitizado:', {
+        //   original: file.name,
+        //   sanitized: sanitizedFileName
+        // })
+
         // Construir o caminho completo no R2
         const r2FilePath = getR2Path(dir, sanitizedFileName)
-        console.log("API: Fazendo upload para R2", { r2FilePath })
+        // console.log('🗂️ [Backend] Caminho R2 construído:', {
+        //   dir,
+        //   sanitizedFileName,
+        //   r2FilePath
+        // })
 
         // Converter File para Buffer
+        // console.log('🔄 [Backend] Convertendo arquivo para Buffer...')
         const bytes = await file.arrayBuffer()
-        let buffer = Buffer.from(bytes)
+        let buffer: Buffer = Buffer.from(bytes)
         let contentType = file.type || "image/jpeg"
+        
+        // console.log('📊 [Backend] Buffer criado:', {
+        //   size: buffer.length,
+        //   contentType: contentType
+        // })
 
         // Processar imagem se for um arquivo de imagem
         const isImage = file.type?.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif|bmp|tiff)$/i.test(sanitizedFileName)
+        // console.log('🖼️ [Backend] Verificando se é imagem:', { isImage, fileType: file.type })
         
         if (isImage) {
           try {
-            console.log("API: Processando imagem antes do upload", { originalSize: buffer.length, type: file.type })
+            // console.log("🖼️ [Backend] Processando imagem antes do upload", { 
+            //   originalSize: buffer.length, 
+            //   type: file.type,
+            //   fileName: sanitizedFileName
+            // })
             
             // Processar com sharp
             const image = sharp(buffer)
             const metadata = await image.metadata()
             
+            // console.log('📐 [Backend] Metadados da imagem:', {
+            //   width: metadata.width,
+            //   height: metadata.height,
+            //   format: metadata.format,
+            //   hasAlpha: metadata.hasAlpha,
+            //   channels: metadata.channels
+            // })
+            
             // Redimensionar se largura > 1800px
             let processedImage = image
             if (metadata.width && metadata.width > 1800) {
+              // console.log(`📏 [Backend] Redimensionando imagem (largura ${metadata.width}px > 1800px)`)
               processedImage = processedImage.resize(1800, null, {
                 withoutEnlargement: true,
                 fit: 'inside'
               })
+            } else {
+              // console.log('✅ [Backend] Imagem não precisa ser redimensionada')
             }
             
             // Aplicar compressão baseada no formato
+            const originalSize = buffer.length
+            let processedBuffer: Buffer
             if (file.type === 'image/jpeg' || /\.(jpg|jpeg)$/i.test(sanitizedFileName)) {
-              buffer = await processedImage.jpeg({ quality: 80 }).toBuffer()
+              // console.log('🔄 [Backend] Convertendo para JPEG com qualidade 80')
+              processedBuffer = Buffer.from(await processedImage.jpeg({ quality: 80 }).toBuffer())
               contentType = "image/jpeg"
             } else if (file.type === 'image/png' || /\.png$/i.test(sanitizedFileName)) {
-              buffer = await processedImage.png({ quality: 80, compressionLevel: 9 }).toBuffer()
+              // console.log('🔄 [Backend] Convertendo para PNG com qualidade 80 e compressão 9')
+              processedBuffer = Buffer.from(await processedImage.png({ quality: 80, compressionLevel: 9 }).toBuffer())
               contentType = "image/png"
             } else if (file.type === 'image/webp' || /\.webp$/i.test(sanitizedFileName)) {
-              buffer = await processedImage.webp({ quality: 80 }).toBuffer()
+              // console.log('🔄 [Backend] Convertendo para WebP com qualidade 80')
+              processedBuffer = Buffer.from(await processedImage.webp({ quality: 80 }).toBuffer())
               contentType = "image/webp"
             } else {
               // Para outros formatos de imagem, converter para JPEG
-              buffer = await processedImage.jpeg({ quality: 80 }).toBuffer()
+              // console.log('🔄 [Backend] Convertendo formato desconhecido para JPEG')
+              processedBuffer = Buffer.from(await processedImage.jpeg({ quality: 80 }).toBuffer())
               contentType = "image/jpeg"
             }
+            buffer = processedBuffer
             
-            console.log("API: Imagem processada com sucesso", { 
-              newSize: buffer.length, 
-              originalSize: Buffer.from(bytes).length,
-              format: contentType
-            })
+            const compressionRatio = ((originalSize - buffer.length) / originalSize * 100).toFixed(2)
+            // console.log("✅ [Backend] Imagem processada com sucesso", { 
+            //   originalSize,
+            //   newSize: buffer.length, 
+            //   compressionRatio: `${compressionRatio}%`,
+            //   format: contentType
+            // })
           } catch (imageError) {
-            console.error("API: Erro ao processar imagem, fazendo upload original", { error: imageError })
+            // console.error("❌ [Backend] Erro ao processar imagem, fazendo upload original", { 
+            //   error: imageError,
+            //   message: imageError instanceof Error ? imageError.message : "Erro desconhecido",
+            //   stack: imageError instanceof Error ? imageError.stack : undefined
+            // })
             // Fallback: usar buffer original se processamento falhar
             buffer = Buffer.from(bytes)
+            // console.log('⚠️ [Backend] Usando buffer original como fallback')
           }
+        } else {
+          // console.log('📄 [Backend] Arquivo não é uma imagem, fazendo upload direto')
         }
 
         // Fazer upload para o R2
+        // console.log('☁️ [Backend] Iniciando upload para R2...', {
+        //   bucket: bucketName,
+        //   key: r2FilePath,
+        //   size: buffer.length,
+        //   contentType
+        // })
+        
         const putCommand = new PutObjectCommand({
           Bucket: bucketName,
           Key: r2FilePath,
@@ -497,15 +753,32 @@ export async function POST(request: Request) {
           ContentType: contentType,
         })
         
-        await s3Client.send(putCommand)
-
-        console.log("API: Arquivo enviado com sucesso para R2", { r2FilePath })
+        try {
+          const uploadStartTime = Date.now()
+          await s3Client.send(putCommand)
+          const uploadTime = Date.now() - uploadStartTime
+          
+          // console.log("✅ [Backend] Arquivo enviado com sucesso para R2", { 
+          //   r2FilePath,
+          //   uploadTime: `${uploadTime}ms`,
+          //   size: buffer.length
+          // })
+        } catch (uploadError) {
+          // console.error("❌ [Backend] Erro ao fazer upload para R2", {
+          //   error: uploadError,
+          //   message: uploadError instanceof Error ? uploadError.message : "Erro desconhecido",
+          //   stack: uploadError instanceof Error ? uploadError.stack : undefined,
+          //   r2FilePath,
+          //   bucketName
+          // })
+          throw uploadError
+        }
         
-        // Invalidar cache relacionado ao diretório
-        const basePrefix = "public/files/"
-        const dirPrefix = dir ? `${basePrefix}${dir}/` : basePrefix
-        invalidateCache(dirPrefix)
+        // Invalidar cache relacionado ao diretório (atual, pai e raiz)
+        // console.log('🗑️ [Backend] Invalidando cache após upload')
+        invalidateCacheForDir(dir)
         
+        // console.log('🎉 [Backend] Upload concluído com sucesso!')
         return NextResponse.json({ message: "Arquivo enviado com sucesso" })
       }
 
@@ -513,10 +786,46 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Ação não reconhecida" }, { status: 400 })
     }
   } catch (error) {
-    console.error("Erro ao processar requisição:", error)
+    // console.error("❌ [Backend] Erro ao processar requisição POST:", {
+    //   error,
+    //   message: error instanceof Error ? error.message : "Erro desconhecido",
+    //   stack: error instanceof Error ? error.stack : undefined,
+    //   name: error instanceof Error ? error.name : typeof error
+    // })
+    
+    // Mensagens de erro mais descritivas baseadas no tipo de erro
+    let errorMessage = "Erro ao processar requisição"
+    let statusCode = 500
+    
+    if (error instanceof Error) {
+      // Erros relacionados a credenciais R2
+      if (error.message.includes("Credenciais") || error.message.includes("R2")) {
+        errorMessage = "Erro de configuração do CloudFlare R2. Verifique as credenciais."
+        statusCode = 500
+      }
+      // Erros de rede/conexão
+      else if (error.message.includes("ECONNREFUSED") || error.message.includes("timeout")) {
+        errorMessage = "Erro de conexão com o CloudFlare R2. Tente novamente."
+        statusCode = 503
+      }
+      // Erros de validação
+      else if (error.message.includes("inválido") || error.message.includes("não especificado")) {
+        errorMessage = error.message
+        statusCode = 400
+      }
+      // Outros erros
+      else {
+        errorMessage = error.message || "Erro desconhecido ao processar requisição"
+      }
+    }
+    
     return NextResponse.json(
-      { error: "Erro ao processar requisição", message: error instanceof Error ? error.message : "Erro desconhecido" },
-      { status: 500 }
+      { 
+        error: errorMessage,
+        message: errorMessage,
+        details: process.env.NODE_ENV === 'development' ? (error instanceof Error ? error.stack : String(error)) : undefined
+      },
+      { status: statusCode }
     )
   }
 }
@@ -527,10 +836,10 @@ export async function DELETE(request: Request) {
     const dir = searchParams.get("dir") || ""
     const itemPath = searchParams.get("path")
 
-    console.log("API: Recebendo requisição DELETE", { dir, itemPath })
+    // console.log("API: Recebendo requisição DELETE", { dir, itemPath })
 
     if (!itemPath) {
-      console.error("API: Nome do item não especificado")
+      // console.error("API: Nome do item não especificado")
       return NextResponse.json({ error: "Nome do item não especificado" }, { status: 400 })
     }
 
@@ -548,7 +857,7 @@ export async function DELETE(request: Request) {
     const r2PathAsFile = getR2Path(dir, sanitizedItemPath)
     const r2PathAsFolder = `${r2PathAsFile}/`
 
-    console.log("API: Caminhos R2 construídos", { r2PathAsFile, r2PathAsFolder })
+    // console.log("API: Caminhos R2 construídos", { r2PathAsFile, r2PathAsFolder })
 
     // Primeiro, verificar se é um arquivo específico
     try {
@@ -560,7 +869,7 @@ export async function DELETE(request: Request) {
       await s3Client.send(headCommand)
       
       // É um arquivo específico
-      console.log("API: Excluindo arquivo", { r2PathAsFile })
+      // console.log("API: Excluindo arquivo", { r2PathAsFile })
       try {
         const deleteCommand = new DeleteObjectCommand({
           Bucket: bucketName,
@@ -568,16 +877,15 @@ export async function DELETE(request: Request) {
         })
         
         await s3Client.send(deleteCommand)
-        console.log("API: Arquivo excluído com sucesso")
+        // console.log("API: Arquivo excluído com sucesso")
         
-        // Invalidar cache relacionado ao diretório
-        const basePrefix = "public/files/"
-        const dirPrefix = dir ? `${basePrefix}${dir}/` : basePrefix
-        invalidateCache(dirPrefix)
+        // Invalidar cache relacionado ao diretório (atual, pai e raiz)
+        // console.log('🗑️ [Backend] Invalidando cache após exclusão de arquivo')
+        invalidateCacheForDir(dir)
         
         return NextResponse.json({ message: "Arquivo excluído com sucesso" })
       } catch (deleteError) {
-        console.error("API: Erro ao excluir arquivo", { error: deleteError, r2PathAsFile })
+        // console.error("API: Erro ao excluir arquivo", { error: deleteError, r2PathAsFile })
         return NextResponse.json(
           { 
             error: "Erro ao excluir arquivo", 
@@ -603,12 +911,12 @@ export async function DELETE(request: Request) {
     const folderFiles = listResponse.Contents || []
     
     if (folderFiles.length === 0) {
-      console.error("API: Item não encontrado", { r2PathAsFile, r2PathAsFolder })
+      // console.error("API: Item não encontrado", { r2PathAsFile, r2PathAsFolder })
       return NextResponse.json({ error: "Item não encontrado" }, { status: 404 })
     }
 
     // É uma pasta - deletar todos os arquivos com esse prefixo
-    console.log("API: Excluindo pasta com arquivos", { r2PathAsFolder, count: folderFiles.length })
+    // console.log("API: Excluindo pasta com arquivos", { r2PathAsFolder, count: folderFiles.length })
     try {
       await Promise.all(
         folderFiles.map(file => {
@@ -619,16 +927,15 @@ export async function DELETE(request: Request) {
           return s3Client.send(deleteCommand)
         })
       )
-      console.log("API: Pasta excluída com sucesso", { count: folderFiles.length })
+      // console.log("API: Pasta excluída com sucesso", { count: folderFiles.length })
       
-      // Invalidar cache relacionado ao diretório
-      const basePrefix = "public/files/"
-      const dirPrefix = dir ? `${basePrefix}${dir}/` : basePrefix
-      invalidateCache(dirPrefix)
+      // Invalidar cache relacionado ao diretório (atual, pai e raiz)
+      // console.log('🗑️ [Backend] Invalidando cache após exclusão de pasta')
+      invalidateCacheForDir(dir)
       
       return NextResponse.json({ message: "Pasta excluída com sucesso" })
     } catch (deleteError) {
-      console.error("API: Erro ao excluir pasta", { error: deleteError, r2PathAsFolder })
+      // console.error("API: Erro ao excluir pasta", { error: deleteError, r2PathAsFolder })
       return NextResponse.json(
         { 
           error: "Erro ao excluir pasta", 
@@ -638,13 +945,48 @@ export async function DELETE(request: Request) {
       )
     }
   } catch (error) {
-    console.error("API: Erro ao processar exclusão:", error)
+    // console.error("❌ [Backend] Erro ao processar exclusão:", {
+    //   error,
+    //   message: error instanceof Error ? error.message : "Erro desconhecido",
+    //   stack: error instanceof Error ? error.stack : undefined,
+    //   dir,
+    //   itemPath,
+    //   name: error instanceof Error ? error.name : typeof error
+    // })
+    
+    // Mensagens de erro mais descritivas
+    let errorMessage = "Erro ao processar exclusão"
+    let statusCode = 500
+    
+    if (error instanceof Error) {
+      // Erros relacionados a credenciais R2
+      if (error.message.includes("Credenciais") || error.message.includes("R2") || error.message.includes("não configurado")) {
+        errorMessage = "Erro de configuração do CloudFlare R2. Verifique as credenciais."
+        statusCode = 500
+      }
+      // Erros de rede/conexão
+      else if (error.message.includes("ECONNREFUSED") || error.message.includes("timeout") || error.message.includes("ENOTFOUND")) {
+        errorMessage = "Erro de conexão com o CloudFlare R2. Tente novamente."
+        statusCode = 503
+      }
+      // Erros de não encontrado
+      else if (error.message.includes("não encontrado") || error.message.includes("NotFound")) {
+        errorMessage = error.message
+        statusCode = 404
+      }
+      // Outros erros
+      else {
+        errorMessage = error.message || "Erro desconhecido ao processar exclusão"
+      }
+    }
+    
     return NextResponse.json(
       { 
-        error: "Erro ao processar exclusão", 
-        message: error instanceof Error ? error.message : "Erro desconhecido" 
+        error: errorMessage,
+        message: errorMessage,
+        details: process.env.NODE_ENV === 'development' ? (error instanceof Error ? error.stack : String(error)) : undefined
       },
-      { status: 500 }
+      { status: statusCode }
     )
   }
 }
