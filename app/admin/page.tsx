@@ -44,6 +44,7 @@ type Order = {
   in_production: boolean
   in_production_at: string | null
   finalized_at: string | null
+  canceled_at: string | null
 }
 
 export default function AdminPage() {
@@ -61,9 +62,12 @@ export default function AdminPage() {
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/catalogointerativo"
   const [downloadingOrder, setDownloadingOrder] = useState<string | null>(null)
   // Definir o filtro 'Somente Pendentes' como padrão
-  const [filterPending, setFilterPending] = useState<"all" | "pending" | "completed" | "in_production" | "finalized">("pending")
+  const [filterPending, setFilterPending] = useState<"all" | "pending" | "completed" | "in_production" | "finalized" | "canceled">("pending")
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false)
   const [selectedOrderToClose, setSelectedOrderToClose] = useState<Order | null>(null)
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false)
+  const [selectedOrderToCancel, setSelectedOrderToCancel] = useState<Order | null>(null)
+  const [canceledDateFilter, setCanceledDateFilter] = useState("")
   const [selectedOrders, setSelectedOrders] = useState<string[]>([])
   const [productionDialogOpen, setProductionDialogOpen] = useState(false)
   const [productionDateFilter, setProductionDateFilter] = useState("")
@@ -83,13 +87,13 @@ export default function AdminPage() {
 
   useEffect(() => {
     filterOrders()
-  }, [orders, dateFilter, completionDateFilter, productionDateFilter, filterPending, searchQuery, finalizedDateFilter])
+  }, [orders, dateFilter, completionDateFilter, productionDateFilter, filterPending, searchQuery, finalizedDateFilter, canceledDateFilter])
 
   // Limpar seleções quando os filtros mudam
   useEffect(() => {
     setSelectedOrders([])
     setSelectedOrdersForList([])
-  }, [dateFilter, completionDateFilter, productionDateFilter, filterPending, searchQuery, finalizedDateFilter])
+  }, [dateFilter, completionDateFilter, productionDateFilter, filterPending, searchQuery, finalizedDateFilter, canceledDateFilter])
 
   const handleLogin = () => {
     if (password === ADMIN_PASSWORD) {
@@ -104,7 +108,8 @@ export default function AdminPage() {
       setError(null)
       console.log("Carregando pedidos...")
 
-      const response = await fetch("/api/orders")
+      // Carregar todos os pedidos, incluindo cancelados, para permitir filtros
+      const response = await fetch("/api/orders?includeCanceled=true")
 
       if (!response.ok) {
         const errorData = await response.json()
@@ -129,17 +134,30 @@ export default function AdminPage() {
       completionDateFilter,
       productionDateFilter,
       filterPending,
-      searchQuery
+      searchQuery,
+      canceledDateFilter
     })
 
-    if (!dateFilter && !completionDateFilter && !productionDateFilter && !finalizedDateFilter && filterPending === "all" && !searchQuery) {
+    if (!dateFilter && !completionDateFilter && !productionDateFilter && !finalizedDateFilter && !canceledDateFilter && filterPending === "all" && !searchQuery) {
       setFilteredOrders(orders)
       return
     }
   
     let filtered = orders
   
-    if (productionDateFilter) {
+    if (canceledDateFilter) {
+      try {
+        console.log("Filtrando por data de cancelamento:", canceledDateFilter)
+        const response = await fetch(`/api/orders?canceledDate=${canceledDateFilter}`)
+        if (!response.ok) throw new Error("Erro ao filtrar por data de cancelamento")
+        filtered = await response.json()
+        console.log("Pedidos filtrados por data de cancelamento:", filtered.length)
+      } catch (error) {
+        console.error("Erro ao filtrar por data de cancelamento:", error)
+        setError(error instanceof Error ? error.message : "Erro desconhecido")
+        return
+      }
+    } else if (productionDateFilter) {
       try {
         console.log("Filtrando por data de produção:", productionDateFilter)
         const response = await fetch(`/api/orders?productionDate=${productionDateFilter}`)
@@ -180,13 +198,20 @@ export default function AdminPage() {
   
     // Aplicar filtros de status após buscar dados do servidor
     if (filterPending === "pending") {
-      filtered = filtered.filter((order) => order.is_pending)
+      filtered = filtered.filter((order) => order.is_pending && !order.canceled_at)
     } else if (filterPending === "completed") {
-      filtered = filtered.filter((order) => !order.is_pending)
+      filtered = filtered.filter((order) => !order.is_pending && !order.canceled_at)
     } else if (filterPending === "in_production") {
-      filtered = filtered.filter((order) => order.in_production === true && !order.finalized_at)
+      filtered = filtered.filter((order) => order.in_production === true && !order.finalized_at && !order.canceled_at)
     } else if (filterPending === "finalized") {
-      filtered = filtered.filter((order) => !!order.finalized_at)
+      filtered = filtered.filter((order) => !!order.finalized_at && !order.canceled_at)
+    } else if (filterPending === "canceled") {
+      filtered = filtered.filter((order) => !!order.canceled_at)
+    }
+
+    // Excluir cancelados da lista padrão (quando não está filtrando por cancelados)
+    if (filterPending !== "canceled" && !canceledDateFilter) {
+      filtered = filtered.filter((order) => !order.canceled_at)
     }
 
     // Busca por nome do cliente ou número do pedido
@@ -389,6 +414,47 @@ export default function AdminPage() {
       })
     } catch (error) {
       console.error("Erro ao marcar pedidos como em produção:", error)
+      toast.error({
+        title: "Erro",
+        description: error instanceof Error ? error.message : "Erro desconhecido",
+      })
+    }
+  }
+
+  const handleCancelOrder = async () => {
+    if (!selectedOrderToCancel) return
+
+    try {
+      const response = await fetch("/api/orders", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ cancel: true, id: selectedOrderToCancel.id }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.message || "Erro ao cancelar pedido")
+      }
+
+      const updated = await response.json()
+
+      setOrders((prev) =>
+        prev.map((order) =>
+          order.id === updated.id ? updated : order
+        )
+      )
+
+      setCancelDialogOpen(false)
+      setSelectedOrderToCancel(null)
+
+      toast.success({
+        title: "Pedido cancelado",
+        description: "O pedido foi marcado como cancelado",
+      })
+    } catch (error) {
+      console.error("Erro ao cancelar pedido:", error)
       toast.error({
         title: "Erro",
         description: error instanceof Error ? error.message : "Erro desconhecido",
@@ -726,6 +792,7 @@ export default function AdminPage() {
                  filterPending === "completed" ? "Somente Com Arte Montada" : 
                  filterPending === "in_production" ? "Somente Em Produção" :
                  filterPending === "finalized" ? "Somente Finalizados" :
+                 filterPending === "canceled" ? "Somente Cancelados" :
                  "Todos os Pedidos"}
                 <ChevronDown className="ml-2 h-4 w-4" />
               </Button>
@@ -745,6 +812,9 @@ export default function AdminPage() {
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setFilterPending("finalized")}>
                 Somente Finalizados
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setFilterPending("canceled")}>
+                Somente Cancelados
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -880,6 +950,30 @@ export default function AdminPage() {
               </div>
             </CardContent>
           </Card>
+          {/* Cancelado em */}
+          <Card className="col-span-1">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-gray-500 mb-2">Cancelado em</p>
+                  <Input
+                    className="text-xs"
+                    id="canceledDate"
+                    type="date"
+                    value={canceledDateFilter}
+                    onChange={(e) => setCanceledDateFilter(e.target.value)}
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => setCanceledDateFilter("")}
+                  className="mt-6"
+                >
+                  Limpar
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
           {/* Campo de busca */}
           <Card className="mb-6 col-span-2">
             <CardContent className="p-4">
@@ -1006,14 +1100,19 @@ export default function AdminPage() {
                               <span>{order.order}</span>
                               <Copy className="w-3 h-3 mr-1" />
                             </button>
-                            {order.finalized_at && (
-                              <p className="text-xs text-blue-600 flex items-center gap-1 mt-1">
-                                {generateOrderReference(order)}
-                                <button onClick={() => copyToClipboard(generateOrderReference(order))} className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 transition-colors">
-                                  <Copy className="w-3 h-3" />
-                                </button>
-                              </p>
-                            )}
+                          {order.finalized_at && (
+                            <p className="text-xs text-blue-600 flex items-center gap-1 mt-1">
+                              {generateOrderReference(order)}
+                              <button onClick={() => copyToClipboard(generateOrderReference(order))} className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 transition-colors">
+                                <Copy className="w-3 h-3" />
+                              </button>
+                            </p>
+                          )}
+                          {order.canceled_at && (
+                            <p className="text-xs text-red-600 flex items-center gap-1 mt-1">
+                              ❌ Cancelado
+                            </p>
+                          )}
                           </div>
                         </TableCell>
                         <TableCell>
@@ -1049,6 +1148,15 @@ export default function AdminPage() {
                               </span>
                               <br/>
                               {formatDate(order.finalized_at)}
+                            </p>
+                          )}
+                          {order.canceled_at && (
+                            <p className="text-xs text-gray-700 mt-2">
+                              <span className="font-medium text-red-600">
+                                ❌ Cancelado em:
+                              </span>
+                              <br/>
+                              {formatDate(order.canceled_at)}
                             </p>
                           )}
                         </TableCell>
@@ -1087,7 +1195,7 @@ export default function AdminPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2"> 
-                            {order.finalized_at ? null : (
+                            {order.finalized_at || order.canceled_at ? null : (
                               <>
                                 <Button 
                                   size="sm" 
@@ -1114,6 +1222,17 @@ export default function AdminPage() {
                                     </Button>
                                   </>
                                 )}
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  className="ml-2"
+                                  onClick={() => {
+                                    setSelectedOrderToCancel(order)
+                                    setCancelDialogOpen(true)
+                                  }}
+                                >
+                                  Cancelar
+                                </Button>
                               </>
                             )}
                           </div>
@@ -1177,6 +1296,27 @@ export default function AdminPage() {
               }}
             >
               Confirmar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de confirmação de cancelamento de pedido */}
+      <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancelar Pedido?</DialogTitle>
+          </DialogHeader>
+          <p>Tem certeza que deseja cancelar este pedido? Esta ação não pode ser desfeita.</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelDialogOpen(false)}>
+              Não, manter pedido
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleCancelOrder}
+            >
+              Sim, cancelar pedido
             </Button>
           </DialogFooter>
         </DialogContent>

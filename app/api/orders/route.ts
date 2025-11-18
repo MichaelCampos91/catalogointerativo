@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { createOrder, getOrders, getOrdersByDate, getOrdersByCompletionDate, getOrdersByProductionDate, updateOrderStatus, getOrdersByOrderNumber, markOrdersInProduction, finalizeOrders, getOrderById } from "@/lib/database"
+import { createOrder, getOrders, getOrdersByDate, getOrdersByCompletionDate, getOrdersByProductionDate, getOrdersByCanceledDate, getAllCanceledOrders, updateOrderStatus, getOrdersByOrderNumber, markOrdersInProduction, finalizeOrders, getOrderById, cancelOrder } from "@/lib/database"
 
 export async function POST(request: Request) {
   try {
@@ -28,11 +28,15 @@ export async function GET(request: Request) {
     const date = searchParams.get("date")
     const completionDate = searchParams.get("completionDate")
     const productionDate = searchParams.get("productionDate")
+    const canceledDate = searchParams.get("canceledDate")
+    const includeCanceled = searchParams.get("includeCanceled") === "true"
     const orderNumber = searchParams.get("order")
 
     let orders
     if (orderNumber) {
       orders = await getOrdersByOrderNumber(orderNumber)
+    } else if (canceledDate) {
+      orders = await getOrdersByCanceledDate(canceledDate)
     } else if (productionDate) {
       orders = await getOrdersByProductionDate(productionDate)
     } else if (completionDate) {
@@ -40,7 +44,7 @@ export async function GET(request: Request) {
     } else if (date) {
       orders = await getOrdersByDate(date)
     } else {
-      orders = await getOrders()
+      orders = await getOrders(includeCanceled)
     }
 
     return NextResponse.json(orders)
@@ -60,12 +64,29 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const body = await request.json()
-    const { id, finalize, orderIds } = body
+    const { id, finalize, orderIds, cancel } = body
 
     // PATCH para finalizar pedidos
     if (finalize && Array.isArray(orderIds)) {
       const updatedOrders = await finalizeOrders(orderIds)
       return NextResponse.json(updatedOrders)
+    }
+
+    // PATCH para cancelar pedido
+    if (cancel && id) {
+      console.log(`API: Cancelando pedido ${id}...`)
+      const order = await getOrderById(id)
+      if (!order) {
+        return NextResponse.json({ error: "Pedido não encontrado" }, { status: 404 })
+      }
+      if (order.finalized_at) {
+        return NextResponse.json({ error: "Pedido já está finalizado e não pode ser cancelado" }, { status: 400 })
+      }
+      if (order.canceled_at) {
+        return NextResponse.json({ error: "Pedido já está cancelado" }, { status: 400 })
+      }
+      const updatedOrder = await cancelOrder(id)
+      return NextResponse.json(updatedOrder)
     }
 
     if (!id) {
@@ -83,10 +104,10 @@ export async function PATCH(request: Request) {
 
     return NextResponse.json(updatedOrder)
   } catch (error) {
-    console.error("API: Erro ao concluir pedido:", error)
+    console.error("API: Erro ao processar pedido:", error)
     return NextResponse.json(
       {
-        error: "Erro ao concluir pedido",
+        error: "Erro ao processar pedido",
         message: error instanceof Error ? error.message : "Erro desconhecido",
         timestamp: new Date().toISOString(),
       },

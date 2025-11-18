@@ -38,6 +38,7 @@ export type Order = {
   in_production: boolean
   in_production_at: string | null
   finalized_at: string | null
+  canceled_at: string | null
 }
 
 export type CreateOrder = {
@@ -49,11 +50,14 @@ export type CreateOrder = {
 }
 
 // Funções para pedidos
-export async function getOrders(): Promise<Order[]> {
+export async function getOrders(includeCanceled: boolean = false): Promise<Order[]> {
   let client
   try {
     client = await pool.connect()
-    const result = await client.query("SELECT * FROM orders ORDER BY created_at ASC")
+    const query = includeCanceled 
+      ? "SELECT * FROM orders ORDER BY created_at ASC"
+      : "SELECT * FROM orders WHERE canceled_at IS NULL ORDER BY created_at ASC"
+    const result = await client.query(query)
     return result.rows.map((row) => ({
       ...row,
       selected_images: row.selected_images,
@@ -61,6 +65,24 @@ export async function getOrders(): Promise<Order[]> {
     }))
   } catch (error) {
     console.error("Erro ao buscar pedidos:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+// Função para buscar todos os pedidos cancelados
+export async function getAllCanceledOrders(): Promise<Order[]> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query("SELECT * FROM orders WHERE canceled_at IS NOT NULL ORDER BY canceled_at DESC")
+    return result.rows.map((row) => ({
+      ...row,
+      selected_images: row.selected_images,
+    }))
+  } catch (error) {
+    console.error("Erro ao buscar pedidos cancelados:", error)
     throw error
   } finally {
     if (client) client.release()
@@ -130,6 +152,29 @@ export async function getOrdersByProductionDate(date: string): Promise<Order[]> 
     }))
   } catch (error) {
     console.error("Erro ao buscar pedidos por data de produção:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+// Função para buscar pedidos por data de cancelamento
+export async function getOrdersByCanceledDate(date: string): Promise<Order[]> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `SELECT * FROM orders 
+       WHERE DATE(canceled_at) = $1 AND canceled_at IS NOT NULL
+       ORDER BY canceled_at ASC`,
+      [date],
+    )
+    return result.rows.map((row) => ({
+      ...row,
+      selected_images: row.selected_images,
+    }))
+  } catch (error) {
+    console.error("Erro ao buscar pedidos por data de cancelamento:", error)
     throw error
   } finally {
     if (client) client.release()
@@ -352,6 +397,56 @@ export async function getOrderById(id: string): Promise<Order | null> {
     }
   } catch (error) {
     console.error("Erro ao buscar pedido por ID:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+// Função para cancelar um pedido
+export async function cancelOrder(id: string): Promise<Order> {
+  let client
+  try {
+    client = await pool.connect()
+    
+    // Verificar se o pedido existe e não está cancelado ou finalizado
+    const checkResult = await client.query(
+      `SELECT id, canceled_at, finalized_at FROM orders WHERE id = $1`,
+      [id]
+    )
+    
+    if (checkResult.rows.length === 0) {
+      throw new Error("Pedido não encontrado")
+    }
+    
+    const order = checkResult.rows[0]
+    if (order.canceled_at) {
+      throw new Error("Pedido já está cancelado")
+    }
+    
+    if (order.finalized_at) {
+      throw new Error("Pedido já está finalizado e não pode ser cancelado")
+    }
+    
+    // Cancelar o pedido
+    const result = await client.query(
+      `UPDATE orders 
+       SET canceled_at = NOW()
+       WHERE id = $1 AND canceled_at IS NULL AND finalized_at IS NULL
+       RETURNING *`,
+      [id],
+    )
+    
+    if (result.rows.length === 0) {
+      throw new Error("Não foi possível cancelar o pedido")
+    }
+    
+    return {
+      ...result.rows[0],
+      selected_images: result.rows[0].selected_images,
+    }
+  } catch (error) {
+    console.error("Erro ao cancelar pedido:", error)
     throw error
   } finally {
     if (client) client.release()
