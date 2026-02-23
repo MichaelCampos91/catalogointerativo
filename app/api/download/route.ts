@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server"
+import { cookies } from "next/headers"
 import path from "path"
 import archiver from "archiver"
 import { PassThrough } from "stream"
 import { S3Client, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3'
+import { requireAuth, authErrorResponse } from "@/lib/auth"
 
 // Função para inicializar o S3Client para Cloudflare R2
 function getS3Client() {
@@ -27,6 +29,14 @@ function getS3Client() {
 }
 
 export async function POST(request: Request) {
+  try {
+    const cookieStore = await cookies()
+    const cookieToken = cookieStore.get("auth_token")?.value
+    await requireAuth(request, cookieToken)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Token não fornecido"
+    return authErrorResponse(msg, 401)
+  }
   try {
     const { selectedImages, customerName, orderNumber, date } = await request.json()
 

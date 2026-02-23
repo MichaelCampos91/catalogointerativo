@@ -22,7 +22,7 @@ import {
   BreadcrumbList,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { ArrowLeft, Folder, FileIcon, RefreshCw, Home, Plus, Upload, Trash2, ImagePlus, FolderPlus } from "lucide-react"
+import { ArrowLeft, Folder, FileIcon, RefreshCw, Home, Plus, Upload, Trash2, ImagePlus, FolderPlus, Pencil } from "lucide-react"
 
 type Category = {
   id: string
@@ -56,39 +56,29 @@ export default function FilesPage() {
   const [files, setFiles] = useState<FilesResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [password, setPassword] = useState("")
   const [showCreateFolder, setShowCreateFolder] = useState(false)
   const [newFolderName, setNewFolderName] = useState("")
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [selectedFolder, setSelectedFolder] = useState<Category | null>(null)
   const [deleteSuccess, setDeleteSuccess] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [showRenameDialog, setShowRenameDialog] = useState(false)
+  const [folderToRename, setFolderToRename] = useState<Category | null>(null)
+  const [renameValue, setRenameValue] = useState("")
+  const [isRenaming, setIsRenaming] = useState(false)
+  const [renameSuccess, setRenameSuccess] = useState<boolean | null>(null)
+  const [renameError, setRenameError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const fileInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
   const searchParams = useSearchParams()
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "/catalogointerativo"
 
-  // Senha simples para demo (em produção, use autenticação adequada)
-  const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "admin123"
-
-  // Obter o diretório atual da URL
   const currentDir = searchParams.get("dir") || ""
 
   useEffect(() => {
-    if (isAuthenticated) {
-      loadFiles()
-    }
-  }, [isAuthenticated, currentDir])
-
-  const handleLogin = () => {
-    if (password === ADMIN_PASSWORD) {
-      setIsAuthenticated(true)
-    } else {
-      alert("Senha incorreta!")
-    }
-  }
+    loadFiles()
+  }, [currentDir])
 
   const loadFiles = async (forceReload: boolean = false) => {
     try {
@@ -275,6 +265,51 @@ export default function FilesPage() {
     setIsDeleting(false)
   }
 
+  const handleOpenRename = (cat: Category) => {
+    setFolderToRename(cat)
+    setRenameValue(cat.name)
+    setRenameSuccess(null)
+    setRenameError(null)
+    setShowRenameDialog(true)
+  }
+
+  const handleCloseRename = () => {
+    setShowRenameDialog(false)
+    setFolderToRename(null)
+    setRenameValue("")
+    setRenameSuccess(null)
+    setRenameError(null)
+    setIsRenaming(false)
+  }
+
+  const handleRenameFolder = async () => {
+    if (!folderToRename || !renameValue.trim()) return
+    const newName = renameValue.trim()
+    if (newName === folderToRename.name) return
+    setIsRenaming(true)
+    setRenameError(null)
+    setRenameSuccess(null)
+    try {
+      const formData = new FormData()
+      formData.append("action", "renameFolder")
+      const cleanDir = currentDir.startsWith("files/") ? currentDir.slice(6) : currentDir
+      formData.append("dir", cleanDir || "")
+      formData.append("oldName", folderToRename.name)
+      formData.append("newName", newName)
+      const response = await fetch("/api/files", { method: "POST", body: formData })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || data.message || "Erro ao renomear pasta")
+      }
+      setRenameSuccess(true)
+      loadFiles(true)
+    } catch (err) {
+      setRenameError(err instanceof Error ? err.message : "Erro ao renomear pasta")
+    } finally {
+      setIsRenaming(false)
+    }
+  }
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files
     if (!files || files.length === 0) {
@@ -416,46 +451,8 @@ export default function FilesPage() {
     }
   }
 
-  // Renderizar login se não estiver autenticado
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle>Área Administrativa - Arquivos</CardTitle>
-            <CardDescription>Digite a senha para acessar o gerenciador de arquivos</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <label htmlFor="password" className="text-sm font-medium">
-                Senha
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-                className="w-full px-3 py-2 border rounded-md"
-                placeholder={`Digite a senha`}
-              />
-            </div>
-            <Button onClick={handleLogin} className="w-full bg-primary text-primary-foreground">
-              Entrar
-            </Button>
-            <Button variant="ghost" onClick={() => router.push("/admin")} className="w-full text-primary">
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Voltar ao Painel
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-6xl mx-auto">
+    <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Gerenciador de Arquivos</h1>
@@ -629,32 +626,33 @@ export default function FilesPage() {
                           <Folder className="w-16 h-16 mx-auto text-blue-500 mb-2" />
                           <p className="text-sm font-medium truncate">{cat.name}</p>
                         </div>
-                        {/* Removido: prévias das imagens dentro do card da pasta */}
-                        {/* {cat.images && cat.images.length > 0 && (
-                          <div className="grid grid-cols-2 gap-2 mt-2">
-                            {cat.images.map((img) => (
-                              <img
-                                key={img.code}
-                                src={img.url}
-                                alt={img.name}
-                                className="w-full h-20 object-cover rounded"
-                              />
-                            ))}
-                          </div>
-                        )} */}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="mt-2 text-red-500 hover:text-red-700 hover:bg-red-50"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setSelectedFolder(cat)
-                            setShowDeleteConfirm(true)
-                          }}
-                          title="Excluir pasta"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
+                        <div className="mt-2 flex items-center justify-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleOpenRename(cat)
+                            }}
+                            title="Renomear pasta"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setSelectedFolder(cat)
+                              setShowDeleteConfirm(true)
+                            }}
+                            title="Excluir pasta"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -689,6 +687,75 @@ export default function FilesPage() {
               <Button onClick={handleCreateFolder} disabled={!newFolderName.trim()}>
                 Criar Pasta
               </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Rename Folder Dialog */}
+        <Dialog open={showRenameDialog} onOpenChange={(open) => !open && handleCloseRename()}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                {renameSuccess === true ? "Pasta renomeada" : renameError ? "Erro ao renomear" : "Renomear Pasta"}
+              </DialogTitle>
+              <DialogDescription>
+                {renameSuccess === true ? (
+                  "A pasta foi renomeada com sucesso."
+                ) : renameError ? (
+                  <span className="text-destructive">{renameError}</span>
+                ) : (
+                  "Digite o novo nome da pasta. Você pode usar espaços, acentos e os caracteres que preferir."
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            {renameSuccess !== true && !renameError && (
+              <div className="py-4">
+                <Label htmlFor="renameFolderName">Novo nome da pasta</Label>
+                <Input
+                  id="renameFolderName"
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  placeholder="Novo nome da pasta"
+                  disabled={isRenaming}
+                />
+              </div>
+            )}
+            <DialogFooter>
+              {renameSuccess === true ? (
+                <Button onClick={handleCloseRename}>Fechar</Button>
+              ) : renameError ? (
+                <>
+                  <Button variant="outline" onClick={handleCloseRename}>
+                    Fechar
+                  </Button>
+                  <Button onClick={() => { setRenameError(null); handleRenameFolder(); }}>
+                    Tentar novamente
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button variant="outline" onClick={handleCloseRename} disabled={isRenaming}>
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={handleRenameFolder}
+                    disabled={
+                      isRenaming ||
+                      !renameValue.trim() ||
+                      renameValue.trim() === folderToRename?.name
+                    }
+                  >
+                    {isRenaming ? (
+                      <>
+                        <span className="inline-block h-4 w-4 border-2 border-current border-r-transparent rounded-full animate-spin mr-2" />
+                        Renomeando...
+                      </>
+                    ) : (
+                      "Renomear"
+                    )}
+                  </Button>
+                </>
+              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -762,7 +829,6 @@ export default function FilesPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </div>
     </div>
   )
 }

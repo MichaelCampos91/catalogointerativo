@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server"
-import { createOrder, getOrders, getOrdersByDate, getOrdersByCompletionDate, getOrdersByProductionDate, getOrdersByCanceledDate, getAllCanceledOrders, updateOrderStatus, getOrdersByOrderNumber, markOrdersInProduction, finalizeOrders, getOrderById, cancelOrder } from "@/lib/database"
+import { cookies } from "next/headers"
+import { createOrder, getOrders, updateOrderStatus, getOrdersByOrderNumber, markOrdersInProduction, finalizeOrders, getOrderById, getOrdersByIds, cancelOrder, getOrdersFiltered, getOrderIdsFiltered, createProductionBatch } from "@/lib/database"
+import type { OrderStatusFilter } from "@/lib/database"
+import { requireAuth, authErrorResponse } from "@/lib/auth"
 
 export async function POST(request: Request) {
   try {
@@ -22,31 +25,75 @@ export async function POST(request: Request) {
   }
 }
 
+const VALID_STATUSES: OrderStatusFilter[] = ["pending", "art_mounted", "in_production", "finalized", "canceled"]
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
-    const date = searchParams.get("date")
-    const completionDate = searchParams.get("completionDate")
-    const productionDate = searchParams.get("productionDate")
-    const canceledDate = searchParams.get("canceledDate")
-    const includeCanceled = searchParams.get("includeCanceled") === "true"
     const orderNumber = searchParams.get("order")
-
-    let orders
+    const idsParam = searchParams.get("ids")
+    const isAdminList = !orderNumber && !idsParam
+    if (isAdminList) {
+      try {
+        const cookieStore = await cookies()
+        const cookieToken = cookieStore.get("auth_token")?.value
+        await requireAuth(request, cookieToken)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Token não fornecido"
+        return authErrorResponse(msg, 401)
+      }
+    }
     if (orderNumber) {
-      orders = await getOrdersByOrderNumber(orderNumber)
-    } else if (canceledDate) {
-      orders = await getOrdersByCanceledDate(canceledDate)
-    } else if (productionDate) {
-      orders = await getOrdersByProductionDate(productionDate)
-    } else if (completionDate) {
-      orders = await getOrdersByCompletionDate(completionDate)
-    } else if (date) {
-      orders = await getOrdersByDate(date)
-    } else {
-      orders = await getOrders(includeCanceled)
+      const orders = await getOrdersByOrderNumber(orderNumber)
+      return NextResponse.json(orders)
+    }
+    if (idsParam) {
+      const ids = idsParam.split(",").map((s) => s.trim()).filter(Boolean)
+      if (ids.length > 0) {
+        const orders = await getOrdersByIds(ids)
+        return NextResponse.json(orders)
+      }
     }
 
+    const statusParam = searchParams.get("status")
+    const statusesParam = searchParams.getAll("status")
+    const statuses = statusesParam.length > 0 ? statusesParam : (statusParam ? [statusParam] : [])
+    const validStatuses = statuses.filter((s): s is OrderStatusFilter => VALID_STATUSES.includes(s as OrderStatusFilter))
+    const periodFrom = searchParams.get("periodFrom") ?? undefined
+    const periodTo = searchParams.get("periodTo") ?? undefined
+    const search = searchParams.get("search") ?? undefined
+    const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10))
+    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") ?? "20", 10)))
+    const idsOnly = searchParams.get("idsOnly") === "true"
+
+    if (validStatuses.length > 0) {
+      if (idsOnly) {
+        const ids = await getOrderIdsFiltered({
+          statuses: validStatuses,
+          periodFrom,
+          periodTo,
+          search,
+        })
+        return NextResponse.json(ids)
+      }
+      const result = await getOrdersFiltered({
+        statuses: validStatuses,
+        periodFrom,
+        periodTo,
+        search,
+        page,
+        pageSize,
+      })
+      return NextResponse.json({
+        orders: result.orders,
+        total: result.total,
+        page,
+        pageSize,
+      })
+    }
+
+    const includeCanceled = searchParams.get("includeCanceled") === "true"
+    const orders = await getOrders(includeCanceled)
     return NextResponse.json(orders)
   } catch (error) {
     console.error("API: Erro ao buscar pedidos:", error)
@@ -62,6 +109,14 @@ export async function GET(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  try {
+    const cookieStore = await cookies()
+    const cookieToken = cookieStore.get("auth_token")?.value
+    await requireAuth(request, cookieToken)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Token não fornecido"
+    return authErrorResponse(msg, 401)
+  }
   try {
     const body = await request.json()
     const { id, finalize, orderIds, cancel } = body
@@ -118,6 +173,14 @@ export async function PATCH(request: Request) {
 
 export async function PUT(request: Request) {
   try {
+    const cookieStore = await cookies()
+    const cookieToken = cookieStore.get("auth_token")?.value
+    await requireAuth(request, cookieToken)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Token não fornecido"
+    return authErrorResponse(msg, 401)
+  }
+  try {
     const body = await request.json()
     const { orderIds } = body
 
@@ -135,6 +198,7 @@ export async function PUT(request: Request) {
 
     console.log(`API: Marcando ${orderIds.length} pedido(s) como em produção...`)
     const updatedOrders = await markOrdersInProduction(orderIds)
+    await createProductionBatch(orderIds)
 
     return NextResponse.json(updatedOrders)
   } catch (error) {

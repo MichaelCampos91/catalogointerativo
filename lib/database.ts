@@ -181,6 +181,178 @@ export async function getOrdersByCanceledDate(date: string): Promise<Order[]> {
   }
 }
 
+export type OrderStatusFilter = "pending" | "art_mounted" | "in_production" | "finalized" | "canceled"
+
+export type GetOrdersFilteredOptions = {
+  statuses: OrderStatusFilter[]
+  periodFrom?: string
+  periodTo?: string
+  search?: string
+  page: number
+  pageSize: number
+}
+
+export type GetOrdersFilteredResult = {
+  orders: Order[]
+  total: number
+}
+
+// Função para buscar pedidos com filtros (status, período, busca) e paginação
+export async function getOrdersFiltered(options: GetOrdersFilteredOptions): Promise<GetOrdersFilteredResult> {
+  const { statuses, periodFrom, periodTo, search, page, pageSize } = options
+  if (!statuses || statuses.length === 0) {
+    return { orders: [], total: 0 }
+  }
+
+  let client
+  try {
+    client = await pool.connect()
+
+    const conditions: string[] = []
+    const params: unknown[] = []
+    let paramIndex = 1
+
+    const statusConditions: string[] = []
+    if (statuses.includes("pending")) {
+      statusConditions.push(`(is_pending = true AND canceled_at IS NULL)`)
+    }
+    if (statuses.includes("art_mounted")) {
+      statusConditions.push(
+        `(is_pending = false AND (in_production = false OR in_production IS NULL) AND finalized_at IS NULL AND canceled_at IS NULL)`
+      )
+    }
+    if (statuses.includes("in_production")) {
+      statusConditions.push(
+        `(in_production = true AND finalized_at IS NULL AND canceled_at IS NULL)`
+      )
+    }
+    if (statuses.includes("finalized")) {
+      statusConditions.push(`(finalized_at IS NOT NULL AND canceled_at IS NULL)`)
+    }
+    if (statuses.includes("canceled")) {
+      statusConditions.push(`(canceled_at IS NOT NULL)`)
+    }
+    if (statusConditions.length > 0) {
+      conditions.push(`(${statusConditions.join(" OR ")})`)
+    }
+
+    if (periodFrom) {
+      conditions.push(`DATE(created_at) >= $${paramIndex}`)
+      params.push(periodFrom)
+      paramIndex++
+    }
+    if (periodTo) {
+      conditions.push(`DATE(created_at) <= $${paramIndex}`)
+      params.push(periodTo)
+      paramIndex++
+    }
+    if (search && search.trim()) {
+      conditions.push(`(customer_name ILIKE $${paramIndex} OR "order" ILIKE $${paramIndex})`)
+      params.push(`%${search.trim()}%`)
+      paramIndex++
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""
+
+    const countResult = await client.query(
+      `SELECT COUNT(*) FROM orders ${whereClause}`,
+      params
+    )
+    const total = parseInt(countResult.rows[0].count, 10)
+
+    const offset = (page - 1) * pageSize
+    const limitParam = `$${paramIndex}`
+    const offsetParam = `$${paramIndex + 1}`
+    const queryParams = [...params, pageSize, offset]
+
+    const result = await client.query(
+      `SELECT * FROM orders ${whereClause} ORDER BY created_at ASC LIMIT ${limitParam} OFFSET ${offsetParam}`,
+      queryParams
+    )
+
+    const orders = result.rows.map((row) => ({
+      ...row,
+      selected_images: row.selected_images,
+      updated_at: row.updated_at,
+    }))
+
+    return { orders, total }
+  } catch (error) {
+    console.error("Erro ao buscar pedidos filtrados:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+// Função para buscar apenas IDs de pedidos com os mesmos filtros (para "selecionar todos")
+export async function getOrderIdsFiltered(options: Omit<GetOrdersFilteredOptions, "page" | "pageSize">): Promise<string[]> {
+  const { statuses, periodFrom, periodTo, search } = options
+  if (!statuses || statuses.length === 0) {
+    return []
+  }
+
+  let client
+  try {
+    client = await pool.connect()
+
+    const conditions: string[] = []
+    const params: unknown[] = []
+    let paramIndex = 1
+
+    const statusConditions: string[] = []
+    if (statuses.includes("pending")) {
+      statusConditions.push(`(is_pending = true AND canceled_at IS NULL)`)
+    }
+    if (statuses.includes("art_mounted")) {
+      statusConditions.push(
+        `(is_pending = false AND (in_production = false OR in_production IS NULL) AND finalized_at IS NULL AND canceled_at IS NULL)`
+      )
+    }
+    if (statuses.includes("in_production")) {
+      statusConditions.push(
+        `(in_production = true AND finalized_at IS NULL AND canceled_at IS NULL)`
+      )
+    }
+    if (statuses.includes("finalized")) {
+      statusConditions.push(`(finalized_at IS NOT NULL AND canceled_at IS NULL)`)
+    }
+    if (statuses.includes("canceled")) {
+      statusConditions.push(`(canceled_at IS NOT NULL)`)
+    }
+    if (statusConditions.length > 0) {
+      conditions.push(`(${statusConditions.join(" OR ")})`)
+    }
+    if (periodFrom) {
+      conditions.push(`DATE(created_at) >= $${paramIndex}`)
+      params.push(periodFrom)
+      paramIndex++
+    }
+    if (periodTo) {
+      conditions.push(`DATE(created_at) <= $${paramIndex}`)
+      params.push(periodTo)
+      paramIndex++
+    }
+    if (search && search.trim()) {
+      conditions.push(`(customer_name ILIKE $${paramIndex} OR "order" ILIKE $${paramIndex})`)
+      params.push(`%${search.trim()}%`)
+      paramIndex++
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""
+    const result = await client.query(
+      `SELECT id FROM orders ${whereClause} ORDER BY created_at ASC`,
+      params
+    )
+    return result.rows.map((r) => r.id)
+  } catch (error) {
+    console.error("Erro ao buscar IDs de pedidos filtrados:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
 // Função para buscar pedidos por número do pedido
 export async function getOrdersByOrderNumber(orderNumber: string): Promise<Order[]> {
   let client
@@ -381,6 +553,29 @@ export async function finalizeOrders(orderIds: string[]): Promise<Order[]> {
   }
 }
 
+// Função para buscar vários pedidos por IDs (para lista/dialog)
+export async function getOrdersByIds(ids: string[]): Promise<Order[]> {
+  if (ids.length === 0) return []
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `SELECT * FROM orders WHERE id = ANY($1) ORDER BY created_at ASC`,
+      [ids],
+    )
+    return result.rows.map((row) => ({
+      ...row,
+      selected_images: row.selected_images,
+      updated_at: row.updated_at,
+    }))
+  } catch (error) {
+    console.error("Erro ao buscar pedidos por IDs:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
 // Função para buscar pedido por UUID
 export async function getOrderById(id: string): Promise<Order | null> {
   let client
@@ -447,6 +642,133 @@ export async function cancelOrder(id: string): Promise<Order> {
     }
   } catch (error) {
     console.error("Erro ao cancelar pedido:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+// --- Histórico de Produção (lotes) ---
+
+export type ProductionBatch = {
+  id: string
+  created_at: string
+  order_count?: number
+}
+
+export async function createProductionBatch(orderIds: string[]): Promise<{ batchId: string; createdAt: string }> {
+  let client
+  try {
+    if (orderIds.length === 0) {
+      throw new Error("Nenhum pedido para criar lote")
+    }
+    client = await pool.connect()
+    const batchResult = await client.query(
+      `INSERT INTO production_batches (id, created_at) VALUES (gen_random_uuid(), NOW()) RETURNING id, created_at`
+    )
+    const batch = batchResult.rows[0]
+    const batchId = batch.id
+    const createdAt = batch.created_at
+
+    for (const orderId of orderIds) {
+      await client.query(
+        `INSERT INTO production_batch_orders (batch_id, order_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [batchId, orderId]
+      )
+    }
+    return { batchId, createdAt }
+  } catch (error) {
+    console.error("Erro ao criar lote de produção:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export type GetProductionBatchesOptions = {
+  periodFrom?: string
+  periodTo?: string
+  page?: number
+  pageSize?: number
+}
+
+export async function getProductionBatches(
+  options: GetProductionBatchesOptions = {}
+): Promise<{ batches: (ProductionBatch & { order_count: number })[]; total: number }> {
+  let client
+  try {
+    const { periodFrom, periodTo, page = 1, pageSize = 20 } = options
+    client = await pool.connect()
+
+    const conditions: string[] = []
+    const params: unknown[] = []
+    let paramIndex = 1
+    if (periodFrom) {
+      conditions.push(`DATE(pb.created_at) >= $${paramIndex}`)
+      params.push(periodFrom)
+      paramIndex++
+    }
+    if (periodTo) {
+      conditions.push(`DATE(pb.created_at) <= $${paramIndex}`)
+      params.push(periodTo)
+      paramIndex++
+    }
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""
+
+    const countResult = await client.query(
+      `SELECT COUNT(*) FROM production_batches pb ${whereClause}`,
+      params
+    )
+    const total = parseInt(countResult.rows[0].count, 10)
+
+    const offset = (page - 1) * pageSize
+    const limitParam = `$${paramIndex}`
+    const offsetParam = `$${paramIndex + 1}`
+    const queryParams = [...params, pageSize, offset]
+
+    const result = await client.query(
+      `SELECT pb.id, pb.created_at, COUNT(pbo.order_id)::int AS order_count
+       FROM production_batches pb
+       LEFT JOIN production_batch_orders pbo ON pbo.batch_id = pb.id
+       ${whereClause}
+       GROUP BY pb.id, pb.created_at
+       ORDER BY pb.created_at DESC
+       LIMIT ${limitParam} OFFSET ${offsetParam}`,
+      queryParams
+    )
+
+    const batches = result.rows.map((row) => ({
+      id: row.id,
+      created_at: row.created_at,
+      order_count: row.order_count,
+    }))
+    return { batches, total }
+  } catch (error) {
+    console.error("Erro ao buscar lotes de produção:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function getProductionBatchOrders(batchId: string): Promise<Order[]> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `SELECT o.* FROM orders o
+       INNER JOIN production_batch_orders pbo ON pbo.order_id = o.id
+       WHERE pbo.batch_id = $1
+       ORDER BY o.created_at ASC`,
+      [batchId]
+    )
+    return result.rows.map((row) => ({
+      ...row,
+      selected_images: row.selected_images,
+      updated_at: row.updated_at,
+    }))
+  } catch (error) {
+    console.error("Erro ao buscar pedidos do lote:", error)
     throw error
   } finally {
     if (client) client.release()

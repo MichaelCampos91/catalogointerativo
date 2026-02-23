@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server"
+import { cookies } from "next/headers"
 import path from "path"
-import { S3Client, ListObjectsV2Command, ListObjectsV2CommandOutput, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, ListObjectsV2Command, ListObjectsV2CommandOutput, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand, CopyObjectCommand } from '@aws-sdk/client-s3'
 import sharp from 'sharp'
 import { getFromCache, setCache, generateCacheKey, invalidateCache, getSignedUrlForR2 } from '@/lib/r2-cache'
+import { requireAuth, authErrorResponse } from "@/lib/auth"
 
 // Função para inicializar o S3Client para Cloudflare R2
 function getS3Client() {
@@ -208,6 +210,14 @@ async function listAllObjects(s3Client: S3Client, bucketName: string, prefix: st
 }
 
 export async function GET(request: Request) {
+  try {
+    const cookieStore = await cookies()
+    const cookieToken = cookieStore.get("auth_token")?.value
+    await requireAuth(request, cookieToken)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Token não fornecido"
+    return authErrorResponse(msg, 401)
+  }
   try {
     const { searchParams } = new URL(request.url)
     const dir = searchParams.get("dir") || ""
@@ -519,6 +529,14 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const cookieStore = await cookies()
+    const cookieToken = cookieStore.get("auth_token")?.value
+    await requireAuth(request, cookieToken)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Token não fornecido"
+    return authErrorResponse(msg, 401)
+  }
+  try {
     const formData = await request.formData()
     const action = formData.get("action")
     const dir = (formData.get("dir") as string) || ""
@@ -606,6 +624,87 @@ export async function POST(request: Request) {
           // console.error("API: Erro ao criar pasta no R2", { error: createError, placeholderPath })
           throw new Error(`Erro ao criar pasta: ${createError instanceof Error ? createError.message : "Erro desconhecido"}`)
         }
+      }
+
+      case "renameFolder": {
+        const oldName = (formData.get("oldName") as string) || ""
+        const newName = (formData.get("newName") as string) || ""
+
+        const sanitizedOld = sanitizeName(oldName)
+        const sanitizedNew = sanitizeName(newName)
+        if (!sanitizedOld || !sanitizedNew) {
+          return NextResponse.json({ error: "Nome da pasta inválido" }, { status: 400 })
+        }
+        if (sanitizedOld === sanitizedNew) {
+          return NextResponse.json({ error: "Nome igual ao atual" }, { status: 400 })
+        }
+
+        const oldPrefix = `${getR2Path(dir, sanitizedOld)}/`
+        const newPrefix = `${getR2Path(dir, sanitizedNew)}/`
+
+        try {
+          const headNew = new HeadObjectCommand({
+            Bucket: bucketName,
+            Key: newPrefix.slice(0, -1),
+          })
+          await s3Client.send(headNew)
+          return NextResponse.json({ error: "Já existe pasta ou arquivo com esse nome" }, { status: 400 })
+        } catch (e: unknown) {
+          const err = e as { name?: string; $metadata?: { httpStatusCode?: number } }
+          if (err.name !== "NotFound" && err.$metadata?.httpStatusCode !== 404) throw e
+        }
+
+        const listNew = new ListObjectsV2Command({
+          Bucket: bucketName,
+          Prefix: newPrefix,
+          MaxKeys: 1,
+        })
+        const listNewRes = await s3Client.send(listNew)
+        if (listNewRes.Contents && listNewRes.Contents.length > 0) {
+          return NextResponse.json({ error: "Já existe pasta ou arquivo com esse nome" }, { status: 400 })
+        }
+
+        const allOldKeys: string[] = []
+        let continuationToken: string | undefined
+        do {
+          const listOld = new ListObjectsV2Command({
+            Bucket: bucketName,
+            Prefix: oldPrefix,
+            ContinuationToken: continuationToken,
+          })
+          const listOldRes = await s3Client.send(listOld)
+          const contents = listOldRes.Contents || []
+          for (const obj of contents) {
+            if (obj.Key) allOldKeys.push(obj.Key)
+          }
+          continuationToken = listOldRes.IsTruncated ? listOldRes.NextContinuationToken : undefined
+        } while (continuationToken)
+
+        if (allOldKeys.length === 0) {
+          return NextResponse.json({ error: "Pasta não encontrada" }, { status: 404 })
+        }
+
+        for (const oldKey of allOldKeys) {
+          const newKey = oldKey.replace(oldPrefix, newPrefix)
+          await s3Client.send(
+            new CopyObjectCommand({
+              Bucket: bucketName,
+              CopySource: `${bucketName}/${oldKey}`,
+              Key: newKey,
+            })
+          )
+        }
+        for (const oldKey of allOldKeys) {
+          await s3Client.send(
+            new DeleteObjectCommand({
+              Bucket: bucketName,
+              Key: oldKey,
+            })
+          )
+        }
+
+        invalidateCacheForDir(dir)
+        return NextResponse.json({ message: "Pasta renomeada com sucesso" })
       }
 
       case "upload": {
@@ -831,6 +930,14 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  try {
+    const cookieStore = await cookies()
+    const cookieToken = cookieStore.get("auth_token")?.value
+    await requireAuth(request, cookieToken)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Token não fornecido"
+    return authErrorResponse(msg, 401)
+  }
   try {
     const { searchParams } = new URL(request.url)
     const dir = searchParams.get("dir") || ""

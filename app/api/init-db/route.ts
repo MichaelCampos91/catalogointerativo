@@ -109,6 +109,22 @@ export async function POST() {
       console.log("API: Campo canceled_at já existe ou erro na migração:", error)
     }
 
+    // Tabelas para Histórico de Produção (lotes)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS production_batches (
+        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS production_batch_orders (
+        batch_id UUID NOT NULL REFERENCES production_batches(id) ON DELETE CASCADE,
+        order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        PRIMARY KEY (batch_id, order_id)
+      );
+    `)
+    console.log("API: Tabelas production_batches e production_batch_orders criadas/verificadas")
+
     // Inserir dados de exemplo apenas se não existirem
     const categoriesCount = await client.query("SELECT COUNT(*) FROM categories")
     if (Number.parseInt(categoriesCount.rows[0].count) === 0) {
