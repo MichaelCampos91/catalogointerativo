@@ -205,7 +205,7 @@ export default function CatalogPage() {
       const missing = selectedImages.filter((code) => !imagesCache[code])
       if (missing.length === 0) return
       try {
-        const res = await fetch(`/api/files?all=true&limit=9999&page=1`)
+        const res = await fetch(`/api/public-catalog?all=true&limit=9999&page=1`)
         if (!res.ok) return
         const j = await res.json()
         const fetched: Record<string, { code: string; image_url: string; category_id: string }> = {}
@@ -313,8 +313,8 @@ export default function CatalogPage() {
         queryParams.append('search', search)
       }
 
-      // Chamar novo endpoint dinâmico
-      const response = await fetch(`/api/files?${queryParams.toString()}`)
+      // Chamar endpoint público de catálogo (sem exigir autenticação)
+      const response = await fetch(`/api/public-catalog?${queryParams.toString()}`)
       if (!response.ok) {
         const errorData = await response.json()
         throw new Error(`Erro ao carregar catálogo: ${errorData.message || response.status}`)
