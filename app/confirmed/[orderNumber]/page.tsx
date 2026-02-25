@@ -88,8 +88,8 @@ export default function ConfirmedPage() {
 
   const loadImageUrls = async (imageCodes: string[]) => {
     try {
-      // Buscar lista completa no novo endpoint dinâmico, como no catálogo
-      const res = await fetch(`/api/files?all=true&limit=9999&page=1`)
+      // Buscar lista completa no endpoint público de catálogo (mesma lógica do /catalog)
+      const res = await fetch(`/api/public-catalog?all=true&limit=9999&page=1`)
       if (!res.ok) throw new Error('Falha ao listar arquivos')
       const j = await res.json()
 
@@ -248,7 +248,7 @@ export default function ConfirmedPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 gap-4 max-h-96 overflow-y-auto">
+            <div className="grid grid-cols-3 md:grid-cols-4 gap-4 max-h-96 overflow-y-auto">
               {imageUrls.map((image, index) => (
                 <Card key={index} className="overflow-hidden">
                   <CardContent className="p-0">
