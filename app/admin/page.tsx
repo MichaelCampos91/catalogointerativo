@@ -37,9 +37,24 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination"
 
-import type { OrderStatusFilter } from "@/lib/database"
+import type { OrderStatusFilter, OrderPeriodField } from "@/lib/database"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 const PAGE_SIZE = 20
+const PERIOD_FIELD_OPTIONS: { value: OrderPeriodField; label: string }[] = [
+  { value: "created", label: "Criado" },
+  { value: "art_mounted", label: "Arte montada" },
+  { value: "in_production", label: "Em produção" },
+  { value: "finalized", label: "Finalizado" },
+  { value: "canceled", label: "Cancelado" },
+]
+
 const STATUS_OPTIONS: { key: OrderStatusFilter; label: string }[] = [
   { key: "pending", label: "Pendentes" },
   { key: "art_mounted", label: "Com arte montada" },
@@ -80,8 +95,13 @@ export default function AdminPage() {
     finalized: false,
     canceled: false,
   })
-  const [periodFrom, setPeriodFrom] = useState("")
-  const [periodTo, setPeriodTo] = useState("")
+  // Período: rascunho (inputs) vs aplicado (enviado à API só após "Filtrar")
+  const [periodFromDraft, setPeriodFromDraft] = useState("")
+  const [periodToDraft, setPeriodToDraft] = useState("")
+  const [periodFieldDraft, setPeriodFieldDraft] = useState<OrderPeriodField>("created")
+  const [periodFromApplied, setPeriodFromApplied] = useState("")
+  const [periodToApplied, setPeriodToApplied] = useState("")
+  const [periodFieldApplied, setPeriodFieldApplied] = useState<OrderPeriodField>("created")
   const [searchQuery, setSearchQuery] = useState("")
   const [searchInput, setSearchInput] = useState("")
   const router = useRouter()
@@ -105,23 +125,30 @@ export default function AdminPage() {
     const active = getActiveStatusFilters(statusFilters)
     if (active.length === 0) return
     loadFilteredOrders(page)
-  }, [statusFilters, periodFrom, periodTo, searchQuery, page])
+  }, [statusFilters, periodFromApplied, periodToApplied, periodFieldApplied, searchQuery, page])
 
   useEffect(() => {
     setSelectedOrders([])
     setSelectedOrdersForList([])
-  }, [statusFilters, periodFrom, periodTo, searchQuery])
+  }, [statusFilters, periodFromApplied, periodToApplied, periodFieldApplied, searchQuery])
 
-  const loadFilteredOrders = async (pageNum: number = 1) => {
+  const loadFilteredOrders = async (
+    pageNum: number = 1,
+    periodOverride?: { from: string; to: string; field: OrderPeriodField },
+  ) => {
     const active = getActiveStatusFilters(statusFilters)
     if (active.length === 0) return
+    const from = periodOverride?.from ?? periodFromApplied
+    const to = periodOverride?.to ?? periodToApplied
+    const field = periodOverride?.field ?? periodFieldApplied
     try {
       setError(null)
       setLoading(true)
       const params = new URLSearchParams()
       active.forEach((s) => params.append("status", s))
-      if (periodFrom) params.set("periodFrom", periodFrom)
-      if (periodTo) params.set("periodTo", periodTo)
+      if (from) params.set("periodFrom", from)
+      if (to) params.set("periodTo", to)
+      if (from && to) params.set("periodField", field)
       if (searchQuery.trim()) params.set("search", searchQuery.trim())
       params.set("page", String(pageNum))
       params.set("pageSize", String(PAGE_SIZE))
@@ -658,23 +685,81 @@ export default function AdminPage() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
           <Card className="md:col-span-2">
             <CardContent className="p-4">
-              <p className="text-xs text-gray-500 mb-2">Período (data de criação do pedido)</p>
+              <p className="text-xs text-gray-500 mb-2">
+                Período — escolha por qual data filtrar; preencha o intervalo e clique em Filtrar.
+              </p>
               <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={periodFieldDraft}
+                  onValueChange={(v) => setPeriodFieldDraft(v as OrderPeriodField)}
+                >
+                  <SelectTrigger className="w-[160px] h-9">
+                    <SelectValue placeholder="Campo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PERIOD_FIELD_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Input
                   type="date"
-                  value={periodFrom}
-                  onChange={(e) => { setPeriodFrom(e.target.value); setPage(1) }}
+                  value={periodFromDraft}
+                  onChange={(e) => setPeriodFromDraft(e.target.value)}
                   className="w-[140px]"
                 />
                 <span className="text-gray-500">até</span>
                 <Input
                   type="date"
-                  value={periodTo}
-                  onChange={(e) => { setPeriodTo(e.target.value); setPage(1) }}
+                  value={periodToDraft}
+                  onChange={(e) => setPeriodToDraft(e.target.value)}
                   className="w-[140px]"
                 />
-                <Button variant="outline" size="sm" onClick={() => { setPeriodFrom(""); setPeriodTo(""); setPage(1) }}>
-                  Limpar período
+              </div>
+              <div className="flex flex-wrap items-center gap-2 mt-3">
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={!periodFromDraft || !periodToDraft}
+                  onClick={() => {
+                    if (!periodFromDraft || !periodToDraft) {
+                      toast.warning({
+                        title: "Período incompleto",
+                        description: "Preencha a data inicial e final e clique em Filtrar.",
+                      })
+                      return
+                    }
+                    setPeriodFromApplied(periodFromDraft)
+                    setPeriodToApplied(periodToDraft)
+                    setPeriodFieldApplied(periodFieldDraft)
+                    setPage(1)
+                    loadFilteredOrders(1, {
+                      from: periodFromDraft,
+                      to: periodToDraft,
+                      field: periodFieldDraft,
+                    })
+                  }}
+                >
+                  Filtrar
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setPeriodFromDraft("")
+                    setPeriodToDraft("")
+                    setPeriodFieldDraft("created")
+                    setPeriodFromApplied("")
+                    setPeriodToApplied("")
+                    setPeriodFieldApplied("created")
+                    setPage(1)
+                    // Override garante fetch sem período (state aplicado ainda pode estar stale)
+                    loadFilteredOrders(1, { from: "", to: "", field: "created" })
+                  }}
+                >
+                  Limpar
                 </Button>
               </div>
             </CardContent>

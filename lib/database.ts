@@ -183,10 +183,81 @@ export async function getOrdersByCanceledDate(date: string): Promise<Order[]> {
 
 export type OrderStatusFilter = "pending" | "art_mounted" | "in_production" | "finalized" | "canceled"
 
+/** Campo de data usado no filtro por período (alinhado à coluna Data no admin). */
+export type OrderPeriodField = "created" | "art_mounted" | "in_production" | "finalized" | "canceled"
+
+const VALID_PERIOD_FIELDS: OrderPeriodField[] = [
+  "created",
+  "art_mounted",
+  "in_production",
+  "finalized",
+  "canceled",
+]
+
+export function normalizePeriodField(value: string | undefined): OrderPeriodField {
+  if (value && VALID_PERIOD_FIELDS.includes(value as OrderPeriodField)) {
+    return value as OrderPeriodField
+  }
+  return "created"
+}
+
+/** Adiciona condições DATE(col) >= / <= para periodFrom/periodTo; retorna novo paramIndex. */
+function appendPeriodConditions(
+  conditions: string[],
+  params: unknown[],
+  paramIndex: number,
+  periodFrom: string | undefined,
+  periodTo: string | undefined,
+  periodField: OrderPeriodField,
+): number {
+  if (!periodFrom && !periodTo) return paramIndex
+
+  let dateExpr: string
+  const extraNotNull: string[] = []
+  switch (periodField) {
+    case "created":
+      dateExpr = "created_at"
+      break
+    case "art_mounted":
+      dateExpr = "updated_at"
+      break
+    case "in_production":
+      dateExpr = "in_production_at"
+      extraNotNull.push("in_production_at IS NOT NULL")
+      break
+    case "finalized":
+      dateExpr = "finalized_at"
+      extraNotNull.push("finalized_at IS NOT NULL")
+      break
+    case "canceled":
+      dateExpr = "canceled_at"
+      extraNotNull.push("canceled_at IS NOT NULL")
+      break
+    default:
+      dateExpr = "created_at"
+  }
+  for (const c of extraNotNull) {
+    conditions.push(c)
+  }
+  if (periodFrom) {
+    conditions.push(`DATE(${dateExpr}) >= $${paramIndex}`)
+    params.push(periodFrom)
+    paramIndex++
+  }
+  if (periodTo) {
+    conditions.push(`DATE(${dateExpr}) <= $${paramIndex}`)
+    params.push(periodTo)
+    paramIndex++
+  }
+  return paramIndex
+}
+
 export type GetOrdersFilteredOptions = {
   statuses: OrderStatusFilter[]
   periodFrom?: string
   periodTo?: string
+  /** Qual coluna de data usar no filtro de período; default created (created_at). */
+  periodField?: OrderPeriodField
   search?: string
   page: number
   pageSize: number
@@ -199,7 +270,7 @@ export type GetOrdersFilteredResult = {
 
 // Função para buscar pedidos com filtros (status, período, busca) e paginação
 export async function getOrdersFiltered(options: GetOrdersFilteredOptions): Promise<GetOrdersFilteredResult> {
-  const { statuses, periodFrom, periodTo, search, page, pageSize } = options
+  const { statuses, periodFrom, periodTo, periodField = "created", search, page, pageSize } = options
   if (!statuses || statuses.length === 0) {
     return { orders: [], total: 0 }
   }
@@ -236,16 +307,8 @@ export async function getOrdersFiltered(options: GetOrdersFilteredOptions): Prom
       conditions.push(`(${statusConditions.join(" OR ")})`)
     }
 
-    if (periodFrom) {
-      conditions.push(`DATE(created_at) >= $${paramIndex}`)
-      params.push(periodFrom)
-      paramIndex++
-    }
-    if (periodTo) {
-      conditions.push(`DATE(created_at) <= $${paramIndex}`)
-      params.push(periodTo)
-      paramIndex++
-    }
+    paramIndex = appendPeriodConditions(conditions, params, paramIndex, periodFrom, periodTo, periodField)
+
     if (search && search.trim()) {
       conditions.push(`(customer_name ILIKE $${paramIndex} OR "order" ILIKE $${paramIndex})`)
       params.push(`%${search.trim()}%`)
@@ -287,7 +350,7 @@ export async function getOrdersFiltered(options: GetOrdersFilteredOptions): Prom
 
 // Função para buscar apenas IDs de pedidos com os mesmos filtros (para "selecionar todos")
 export async function getOrderIdsFiltered(options: Omit<GetOrdersFilteredOptions, "page" | "pageSize">): Promise<string[]> {
-  const { statuses, periodFrom, periodTo, search } = options
+  const { statuses, periodFrom, periodTo, periodField = "created", search } = options
   if (!statuses || statuses.length === 0) {
     return []
   }
@@ -323,16 +386,8 @@ export async function getOrderIdsFiltered(options: Omit<GetOrdersFilteredOptions
     if (statusConditions.length > 0) {
       conditions.push(`(${statusConditions.join(" OR ")})`)
     }
-    if (periodFrom) {
-      conditions.push(`DATE(created_at) >= $${paramIndex}`)
-      params.push(periodFrom)
-      paramIndex++
-    }
-    if (periodTo) {
-      conditions.push(`DATE(created_at) <= $${paramIndex}`)
-      params.push(periodTo)
-      paramIndex++
-    }
+    paramIndex = appendPeriodConditions(conditions, params, paramIndex, periodFrom, periodTo, periodField)
+
     if (search && search.trim()) {
       conditions.push(`(customer_name ILIKE $${paramIndex} OR "order" ILIKE $${paramIndex})`)
       params.push(`%${search.trim()}%`)

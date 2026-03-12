@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
 import { createOrder, getOrders, updateOrderStatus, getOrdersByOrderNumber, markOrdersInProduction, finalizeOrders, getOrderById, getOrdersByIds, cancelOrder, getOrdersFiltered, getOrderIdsFiltered, createProductionBatch } from "@/lib/database"
 import type { OrderStatusFilter } from "@/lib/database"
+import { normalizePeriodField } from "@/lib/database"
 import { requireAuth, authErrorResponse } from "@/lib/auth"
 
 export async function POST(request: Request) {
@@ -61,6 +62,7 @@ export async function GET(request: Request) {
     const validStatuses = statuses.filter((s): s is OrderStatusFilter => VALID_STATUSES.includes(s as OrderStatusFilter))
     const periodFrom = searchParams.get("periodFrom") ?? undefined
     const periodTo = searchParams.get("periodTo") ?? undefined
+    const periodField = normalizePeriodField(searchParams.get("periodField") ?? undefined)
     const search = searchParams.get("search") ?? undefined
     const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10))
     const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") ?? "20", 10)))
@@ -72,6 +74,7 @@ export async function GET(request: Request) {
           statuses: validStatuses,
           periodFrom,
           periodTo,
+          periodField,
           search,
         })
         return NextResponse.json(ids)
@@ -80,6 +83,7 @@ export async function GET(request: Request) {
         statuses: validStatuses,
         periodFrom,
         periodTo,
+        periodField,
         search,
         page,
         pageSize,
