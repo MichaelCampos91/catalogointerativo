@@ -449,6 +449,39 @@ export async function checkOrderExists(orderNumber: string): Promise<boolean> {
   }
 }
 
+/**
+ * Retorna os códigos de imagem mais frequentes em pedidos dos últimos N dias.
+ * Exclui pedidos cancelados. Apenas leitura; usa jsonb_array_elements_text.
+ */
+export async function getTrendingImageCodes(
+  limit: number = 30,
+  days: number = 7
+): Promise<string[]> {
+  let client
+  try {
+    client = await pool.connect()
+    const safeLimit = Math.min(Math.max(1, limit), 50)
+    const safeDays = Math.min(Math.max(1, days), 90)
+    const result = await client.query(
+      `SELECT elem AS code
+       FROM orders o,
+            jsonb_array_elements_text(o.selected_images) AS elem
+       WHERE o.created_at >= NOW() - ($2 * INTERVAL '1 day')
+         AND o.canceled_at IS NULL
+       GROUP BY elem
+       ORDER BY COUNT(*) DESC
+       LIMIT $1`,
+      [safeLimit, safeDays]
+    )
+    return result.rows.map((row: { code: string }) => row.code)
+  } catch (error) {
+    console.error("Erro ao buscar códigos em tendência:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
 // Função para criar um novo pedido
 export async function createOrder(order: CreateOrder): Promise<Order> {
   let client

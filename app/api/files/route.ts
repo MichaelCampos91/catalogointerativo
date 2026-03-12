@@ -209,6 +209,69 @@ async function listAllObjects(s3Client: S3Client, bucketName: string, prefix: st
   return allObjects
 }
 
+export type TrendingImageEntry = {
+  code: string
+  url: string
+  category_id: string
+}
+
+/**
+ * Resolve códigos (ordem do ranking) para URLs assinadas do R2.
+ * Lista o prefixo public/files/ uma vez; mesma lógica de code que buildCatalogResponse na raiz.
+ * Códigos sem arquivo no R2 são omitidos.
+ */
+export async function resolveTrendingCatalogImages(codes: string[]): Promise<TrendingImageEntry[]> {
+  if (!codes.length) return []
+
+  const codeSet = new Set(codes)
+  const codeToKey = new Map<string, { key: string; category: string }>()
+  const basePrefix = "public/files/"
+
+  let s3Client: S3Client
+  let bucketName: string
+  try {
+    const bucket = getBucketAndPath()
+    s3Client = bucket.s3Client
+    bucketName = bucket.bucketName
+  } catch {
+    return []
+  }
+
+  const objects = await listAllObjects(s3Client, bucketName, basePrefix)
+
+  for (const obj of objects) {
+    const key = obj.Key
+    if (!key || key.endsWith(".folder")) continue
+    if (!/\.(jpg|jpeg|png|webp)$/i.test(key)) continue
+
+    const pathParts = key.split("/")
+    if (pathParts.length < 3) continue
+
+    // Mesmo critério da raiz em buildCatalogResponse: public/files/CATEGORIA/arquivo
+    const category = pathParts[2]
+    const fileName = pathParts[pathParts.length - 1]
+    const code = path.parse(fileName).name
+
+    if (!codeSet.has(code) || codeToKey.has(code)) continue
+    codeToKey.set(code, { key, category })
+  }
+
+  const ordered: Array<{ code: string; key: string; category: string }> = []
+  for (const code of codes) {
+    const entry = codeToKey.get(code)
+    if (entry) ordered.push({ code, key: entry.key, category: entry.category })
+  }
+  if (ordered.length === 0) return []
+
+  const signedUrls = await Promise.all(ordered.map(({ key }) => getSignedUrlForR2(s3Client, bucketName, key)))
+
+  return ordered.map(({ code, category }, index) => ({
+    code,
+    url: signedUrls[index],
+    category_id: category,
+  }))
+}
+
 export async function buildCatalogResponse(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
