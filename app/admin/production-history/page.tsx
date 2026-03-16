@@ -23,7 +23,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination"
-import { getMeasureForQuantity } from "./measurements"
+import { getMeasureForQuantity } from "../measurements"
 
 type Batch = {
   id: string
