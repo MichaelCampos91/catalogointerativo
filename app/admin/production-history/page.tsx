@@ -1,5 +1,5 @@
 "use client"
-
+ 
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -23,6 +23,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination"
+import { getMeasureForQuantity } from "./measurements"
 
 type Batch = {
   id: string
@@ -42,7 +43,7 @@ type Order = {
   updated_at: string
 }
 
-const PAGE_SIZE = 20
+const PAGE_SIZE = 100
 
 function formatDate(dateString: string) {
   return new Date(dateString).toLocaleString("pt-BR")
@@ -55,13 +56,8 @@ function generateOrderReference(order: Order): string {
   const month = (completionDate.getMonth() + 1).toString().padStart(2, "0")
   const year = completionDate.getFullYear().toString()
   const dateString = `${day}${month}${year}`
-  const priceTable: Record<number, string> = {
-    2: "1,58", 4: "1,58", 6: "1,58", 8: "1,67", 10: "2,22", 11: "2,26", 12: "2,44",
-    16: "3,33", 17: "3,37", 20: "3,89", 21: "4,09", 24: "4,65", 26: "5,03", 28: "5,55",
-    30: "5,76", 32: "6,10", 35: "6,71", 36: "6,87", 40: "7,76", 60: "11,32",
-  }
-  const price = priceTable[order.quantity_purchased] || "N/A"
-  return `${order.order}-${dateString}-50x50 ${price}`
+  const measure = getMeasureForQuantity(order.quantity_purchased)
+  return `${order.order}-${dateString}-${order.quantity_purchased}UN ${measure}`
 }
 
 export default function ProductionHistoryPage() {

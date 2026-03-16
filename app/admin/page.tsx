@@ -45,8 +45,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { getMeasureForQuantity } from "./measurements"
 
-const PAGE_SIZE = 20
+const PAGE_SIZE = 100
 const PERIOD_FIELD_OPTIONS: { value: OrderPeriodField; label: string }[] = [
   { value: "created", label: "Criado" },
   { value: "art_mounted", label: "Arte montada" },
@@ -488,47 +489,32 @@ export default function AdminPage() {
     copyToClipboard(orderNumbers)
   }
 
+  const generateSimpleReference = (order: Order) => {
+    const completionDate = order.is_pending ? null : new Date(order.updated_at)
+    if (!completionDate) {
+      return "Pendente"
+    }
+    const day = completionDate.getDate().toString().padStart(2, "0")
+    const month = (completionDate.getMonth() + 1).toString().padStart(2, "0")
+    const year = completionDate.getFullYear().toString()
+    const dateString = `${day}${month}${year}`
+    return `${order.order}-${dateString}-${order.quantity_purchased}UN`
+  }
+
   const handleCopyReferences = () => {
     // Usar o estado separado para garantir que os dados não mudem após atualização
     const references = selectedOrdersDataForList.map(order => generateOrderReference(order)).join('\n')
     copyToClipboard(references)
   }
 
-  // Helper: obter medida de material pela quantidade
-  function getMeasureForQuantity(quantity: number): string {
-    const measureTable: { [key: number]: string } = {
-      2: "1,58",
-      4: "1,58",
-      6: "1,58",
-      8: "1,67",
-      10: "2,22",
-      11: "2,26",
-      12: "2,44",
-      16: "3,33",
-      17: "3,37",
-      20: "3,89",
-      21: "4,09",
-      24: "4,65",
-      26: "5,03",
-      28: "5,55",
-      30: "5,76",
-      32: "6,10",
-      35: "6,71",
-      36: "6,87",
-      40: "7,76",
-      60: "11,32",
-    }
-    return measureTable[quantity] || "N/A"
-  }
-
-  // Copiar como tabela (Referência \t Medida)
+  // Copiar como tabela (Referência \t 1 \t Medida)
   const handleCopyReferencesAsTable = () => {
     const lines = selectedOrdersDataForList.map((order) => {
       const refWithMeasure = generateOrderReference(order)
       const lastSpace = refWithMeasure.lastIndexOf(" ")
       const reference = lastSpace > -1 ? refWithMeasure.slice(0, lastSpace) : refWithMeasure
       const measure = getMeasureForQuantity(order.quantity_purchased)
-      return `${reference}\t${measure}`
+      return `${reference}\t1\t${measure}`
     })
     copyToClipboard(lines.join("\n"))
   }
@@ -556,35 +542,11 @@ export default function AdminPage() {
     const year = completionDate.getFullYear().toString() // 4 dígitos
     const dateString = `${day}${month}${year}`
 
-    // Tabela de preços baseada na quantidade
-    const priceTable: { [key: number]: string } = {
-      2: "1,58",
-      4: "1,58", 
-      6: "1,58",
-      8: "1,67",
-      10: "2,22",
-      11: "2,26",
-      12: "2,44",
-      16: "3,33",
-      17: "3,37",
-      20: "3,89",
-      21: "4,09",
-      24: "4,65",
-      26: "5,03",
-      28: "5,55",
-      30: "5,76",
-      32: "6,10",
-      35: "6,71",
-      36: "6,87",
-      40: "7,76",
-      60: "11,32"
-    }
-
     const quantity = order.quantity_purchased
-    const price = priceTable[quantity] || "N/A"
+    const measure = getMeasureForQuantity(quantity)
 
-    // Novo formato: [Número do pedido]-data-50x50 metragem
-    return `${order.order}-${dateString}-50x50 ${price}`
+    // Novo formato: [Número do pedido]-data-[quantidade]UN metragem
+    return `${order.order}-${dateString}-${quantity}UN ${measure}`
   }
 
   if (loading) {
@@ -915,6 +877,15 @@ export default function AdminPage() {
                               <span>{order.order}</span>
                               <Copy className="w-3 h-3 mr-1" />
                             </button>
+                            {!order.is_pending && (
+                              <button
+                                onClick={() => copyToClipboard(generateSimpleReference(order))}
+                                className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+                              >
+                                <span>{generateSimpleReference(order)}</span>
+                                <Copy className="w-3 h-3 mr-1" />
+                              </button>
+                            )}
                           {order.finalized_at && (
                             <p className="text-xs text-blue-600 flex items-center gap-1 mt-1">
                               {generateOrderReference(order)}

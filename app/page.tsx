@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation"
 import { Suspense } from "react"
 import { CustomerInitializer } from "@/components/CustomerInitializer"
 import Image from "next/image"
+import { MEASURE_BY_QUANTITY } from "./admin/measurements"
 
 export default function HomePage() {
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '/catalogointerativo'
@@ -144,11 +145,14 @@ export default function HomePage() {
                     <SelectValue placeholder="Selecione a quantidade" />
                   </SelectTrigger>
                   <SelectContent>
-                    {Array.from({ length: 20 }, (_, i) => i + 1).map((num) => (
-                      <SelectItem key={num} value={num.toString()}>
-                        {num} {num === 1 ? "produto" : "produtos"}
-                      </SelectItem>
-                    ))}
+                    {Object.keys(MEASURE_BY_QUANTITY)
+                      .map((key) => Number(key))
+                      .sort((a, b) => a - b)
+                      .map((num) => (
+                        <SelectItem key={num} value={num.toString()}>
+                          {num} {num === 1 ? "produto" : "produtos"}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>
