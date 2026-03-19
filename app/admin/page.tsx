@@ -103,6 +103,8 @@ export default function AdminPage() {
   const [periodFromApplied, setPeriodFromApplied] = useState("")
   const [periodToApplied, setPeriodToApplied] = useState("")
   const [periodFieldApplied, setPeriodFieldApplied] = useState<OrderPeriodField>("created")
+  const [quantityDraft, setQuantityDraft] = useState("")
+  const [quantityApplied, setQuantityApplied] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
   const [searchInput, setSearchInput] = useState("")
   const router = useRouter()
@@ -126,12 +128,12 @@ export default function AdminPage() {
     const active = getActiveStatusFilters(statusFilters)
     if (active.length === 0) return
     loadFilteredOrders(page)
-  }, [statusFilters, periodFromApplied, periodToApplied, periodFieldApplied, searchQuery, page])
+  }, [statusFilters, periodFromApplied, periodToApplied, periodFieldApplied, quantityApplied, searchQuery, page])
 
   useEffect(() => {
     setSelectedOrders([])
     setSelectedOrdersForList([])
-  }, [statusFilters, periodFromApplied, periodToApplied, periodFieldApplied, searchQuery])
+  }, [statusFilters, periodFromApplied, periodToApplied, periodFieldApplied, quantityApplied, searchQuery])
 
   const loadFilteredOrders = async (
     pageNum: number = 1,
@@ -150,6 +152,7 @@ export default function AdminPage() {
       if (from) params.set("periodFrom", from)
       if (to) params.set("periodTo", to)
       if (from && to) params.set("periodField", field)
+      if (quantityApplied.trim()) params.set("quantity", quantityApplied.trim())
       if (searchQuery.trim()) params.set("search", searchQuery.trim())
       params.set("page", String(pageNum))
       params.set("pageSize", String(PAGE_SIZE))
@@ -490,13 +493,10 @@ export default function AdminPage() {
   }
 
   const generateSimpleReference = (order: Order) => {
-    const completionDate = order.is_pending ? null : new Date(order.updated_at)
-    if (!completionDate) {
-      return "Pendente"
-    }
-    const day = completionDate.getDate().toString().padStart(2, "0")
-    const month = (completionDate.getMonth() + 1).toString().padStart(2, "0")
-    const year = completionDate.getFullYear().toString()
+    const referenceDate = order.is_pending ? new Date() : new Date(order.updated_at)
+    const day = referenceDate.getDate().toString().padStart(2, "0")
+    const month = (referenceDate.getMonth() + 1).toString().padStart(2, "0")
+    const year = referenceDate.getFullYear().toString()
     const dateString = `${day}${month}${year}`
     return `${order.order}-${dateString}-${order.quantity_purchased}UN`
   }
@@ -597,48 +597,102 @@ export default function AdminPage() {
         {/* Filtros: Status (checkboxes) */}
         <Card className="mb-4">
           <CardContent className="p-4">
-            <p className="text-xs text-gray-500 mb-2">Status (marque um ou mais)</p>
-            <div className="flex flex-wrap gap-4">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <Checkbox
-                  checked={STATUS_OPTIONS.every((o) => statusFilters[o.key])}
-                  onCheckedChange={(checked) => {
-                    if (checked) {
-                      setStatusFilters({
-                        pending: true,
-                        art_mounted: true,
-                        in_production: true,
-                        finalized: true,
-                        canceled: true,
-                      })
-                    } else {
-                      setStatusFilters({
-                        pending: true,
-                        art_mounted: false,
-                        in_production: false,
-                        finalized: false,
-                        canceled: false,
-                      })
-                    }
-                    setPage(1)
-                  }}
-                />
-                <span className="text-sm font-medium">Todos</span>
-              </label>
-              {STATUS_OPTIONS.map(({ key, label }) => (
-                <label key={key} className="flex items-center gap-2 cursor-pointer">
-                  <Checkbox
-                    checked={statusFilters[key]}
-                    onCheckedChange={(checked) => {
-                      const next = { ...statusFilters, [key]: !!checked }
-                      if (!checked && getActiveStatusFilters(next).length === 0) return
-                      setStatusFilters(next)
-                      setPage(1)
-                    }}
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div className="flex-1 min-w-[280px]">
+                <p className="text-xs text-gray-500 mb-2">Filtrar por status (marque um ou mais)</p>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={STATUS_OPTIONS.every((o) => statusFilters[o.key])}
+                      onCheckedChange={(checked) => {
+                        if (checked) {
+                          setStatusFilters({
+                            pending: true,
+                            art_mounted: true,
+                            in_production: true,
+                            finalized: true,
+                            canceled: true,
+                          })
+                        } else {
+                          setStatusFilters({
+                            pending: true,
+                            art_mounted: false,
+                            in_production: false,
+                            finalized: false,
+                            canceled: false,
+                          })
+                        }
+                        setPage(1)
+                      }}
+                    />
+                    <span className="text-sm font-medium">Todos</span>
+                  </label>
+                  {STATUS_OPTIONS.map(({ key, label }) => (
+                    <label key={key} className="flex items-center gap-2 cursor-pointer">
+                      <Checkbox
+                        checked={statusFilters[key]}
+                        onCheckedChange={(checked) => {
+                          const next = { ...statusFilters, [key]: !!checked }
+                          if (!checked && getActiveStatusFilters(next).length === 0) return
+                          setStatusFilters(next)
+                          setPage(1)
+                        }}
+                      />
+                      <span className="text-sm">{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="w-full sm:w-[230px]">
+                <p className="text-xs text-gray-500 mb-2">Filtrar por Quantidade</p>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={1}
+                    step={1}
+                    placeholder=""
+                    value={quantityDraft}
+                    onChange={(e) => setQuantityDraft(e.target.value)}
                   />
-                  <span className="text-sm">{label}</span>
-                </label>
-              ))}
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      const normalizedQuantity = quantityDraft.trim()
+                      if (normalizedQuantity) {
+                        const parsedQuantity = Number.parseInt(normalizedQuantity, 10)
+                        if (!Number.isInteger(parsedQuantity) || parsedQuantity <= 0) {
+                          toast.warning({
+                            title: "Quantidade inválida",
+                            description: "Informe um número inteiro maior que zero.",
+                          })
+                          return
+                        }
+                        setQuantityApplied(String(parsedQuantity))
+                      } else {
+                        setQuantityApplied("")
+                      }
+                      setPage(1)
+                      loadFilteredOrders(1)
+                    }}
+                  >
+                    Filtrar
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setQuantityDraft("")
+                      setQuantityApplied("")
+                      setPage(1)
+                      loadFilteredOrders(1)
+                    }}
+                  >
+                    Limpar
+                  </Button>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -648,7 +702,7 @@ export default function AdminPage() {
           <Card className="md:col-span-2">
             <CardContent className="p-4">
               <p className="text-xs text-gray-500 mb-2">
-                Período — escolha por qual data filtrar; preencha o intervalo e clique em Filtrar.
+                Filtrar por período — Preencha o intervalo e clique em Filtrar.
               </p>
               <div className="flex flex-wrap items-center gap-2">
                 <Select
@@ -684,9 +738,9 @@ export default function AdminPage() {
                 <Button
                   type="button"
                   size="sm"
-                  disabled={!periodFromDraft || !periodToDraft}
                   onClick={() => {
-                    if (!periodFromDraft || !periodToDraft) {
+                    const hasSomePeriod = !!periodFromDraft || !!periodToDraft
+                    if (hasSomePeriod && (!periodFromDraft || !periodToDraft)) {
                       toast.warning({
                         title: "Período incompleto",
                         description: "Preencha a data inicial e final e clique em Filtrar.",
@@ -729,7 +783,7 @@ export default function AdminPage() {
           <Card className="md:col-span-2">
             <CardContent className="p-4">
               <p className="text-xs text-gray-500 mb-2">Buscar por nome ou número do pedido</p>
-              <div className="flex gap-2">
+              <div className="flex flex-col gap-2">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
                   <Input
@@ -738,23 +792,26 @@ export default function AdminPage() {
                     value={searchInput}
                     onChange={(e) => setSearchInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") { setSearchQuery(searchInput); setPage(1) } }}
-                    className="pl-9 pr-9"
+                    className="pl-9"
                   />
+                </div>
+                <div className="flex items-center gap-2">
                   <Button
-                    variant="ghost"
+                    type="button"
                     size="sm"
-                    className="absolute right-1 top-1/2 -translate-y-1/2"
+                    onClick={() => { setSearchQuery(searchInput); setPage(1) }}
+                  >
+                    Buscar
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
                     onClick={() => { setSearchInput(""); setSearchQuery(""); setPage(1) }}
                   >
                     Limpar
                   </Button>
                 </div>
-                <Button
-                  type="button"
-                  onClick={() => { setSearchQuery(searchInput); setPage(1) }}
-                >
-                  Buscar
-                </Button>
               </div>
             </CardContent>
           </Card>
@@ -877,10 +934,14 @@ export default function AdminPage() {
                               <span>{order.order}</span>
                               <Copy className="w-3 h-3 mr-1" />
                             </button>
-                            {!order.is_pending && (
+                            {!order.canceled_at && (
                               <button
                                 onClick={() => copyToClipboard(generateSimpleReference(order))}
-                                className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+                                className={`flex items-center gap-1 text-xs transition-colors ${
+                                  order.is_pending
+                                    ? "text-green-600 hover:text-green-700"
+                                    : "text-blue-600 hover:text-blue-700"
+                                }`}
                               >
                                 <span>{generateSimpleReference(order)}</span>
                                 <Copy className="w-3 h-3 mr-1" />

@@ -259,6 +259,7 @@ export type GetOrdersFilteredOptions = {
   /** Qual coluna de data usar no filtro de período; default created (created_at). */
   periodField?: OrderPeriodField
   search?: string
+  quantity?: number
   page: number
   pageSize: number
 }
@@ -270,7 +271,7 @@ export type GetOrdersFilteredResult = {
 
 // Função para buscar pedidos com filtros (status, período, busca) e paginação
 export async function getOrdersFiltered(options: GetOrdersFilteredOptions): Promise<GetOrdersFilteredResult> {
-  const { statuses, periodFrom, periodTo, periodField = "created", search, page, pageSize } = options
+  const { statuses, periodFrom, periodTo, periodField = "created", search, quantity, page, pageSize } = options
   if (!statuses || statuses.length === 0) {
     return { orders: [], total: 0 }
   }
@@ -315,6 +316,12 @@ export async function getOrdersFiltered(options: GetOrdersFilteredOptions): Prom
       paramIndex++
     }
 
+    if (typeof quantity === "number" && Number.isInteger(quantity) && quantity > 0) {
+      conditions.push(`quantity_purchased = $${paramIndex}`)
+      params.push(quantity)
+      paramIndex++
+    }
+
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""
 
     const countResult = await client.query(
@@ -350,7 +357,7 @@ export async function getOrdersFiltered(options: GetOrdersFilteredOptions): Prom
 
 // Função para buscar apenas IDs de pedidos com os mesmos filtros (para "selecionar todos")
 export async function getOrderIdsFiltered(options: Omit<GetOrdersFilteredOptions, "page" | "pageSize">): Promise<string[]> {
-  const { statuses, periodFrom, periodTo, periodField = "created", search } = options
+  const { statuses, periodFrom, periodTo, periodField = "created", search, quantity } = options
   if (!statuses || statuses.length === 0) {
     return []
   }
@@ -391,6 +398,12 @@ export async function getOrderIdsFiltered(options: Omit<GetOrdersFilteredOptions
     if (search && search.trim()) {
       conditions.push(`(customer_name ILIKE $${paramIndex} OR "order" ILIKE $${paramIndex})`)
       params.push(`%${search.trim()}%`)
+      paramIndex++
+    }
+
+    if (typeof quantity === "number" && Number.isInteger(quantity) && quantity > 0) {
+      conditions.push(`quantity_purchased = $${paramIndex}`)
+      params.push(quantity)
       paramIndex++
     }
 

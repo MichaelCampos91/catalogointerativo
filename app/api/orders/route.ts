@@ -64,6 +64,9 @@ export async function GET(request: Request) {
     const periodTo = searchParams.get("periodTo") ?? undefined
     const periodField = normalizePeriodField(searchParams.get("periodField") ?? undefined)
     const search = searchParams.get("search") ?? undefined
+    const quantityParam = searchParams.get("quantity")
+    const parsedQuantity = quantityParam && quantityParam.trim() !== "" ? parseInt(quantityParam, 10) : undefined
+    const quantity = parsedQuantity !== undefined && Number.isFinite(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : undefined
     const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10))
     const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") ?? "20", 10)))
     const idsOnly = searchParams.get("idsOnly") === "true"
@@ -76,6 +79,7 @@ export async function GET(request: Request) {
           periodTo,
           periodField,
           search,
+          quantity,
         })
         return NextResponse.json(ids)
       }
@@ -85,6 +89,7 @@ export async function GET(request: Request) {
         periodTo,
         periodField,
         search,
+        quantity,
         page,
         pageSize,
       })
