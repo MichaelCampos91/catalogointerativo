@@ -1,12 +1,11 @@
 "use client"
 
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, MessageCircle, Check, AlertCircle, Search, AlertTriangle } from "lucide-react"
+import { ArrowLeft, Check, AlertCircle, Search, AlertTriangle, Minus, Plus } from "lucide-react"
 import { useRouter } from "next/navigation"
-import Image from "next/image"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -60,6 +59,22 @@ export default function CatalogPage() {
   const [imagesCache, setImagesCache] = useState<Record<string, { code: string; image_url: string; category_id: string }>>({})
   const [trendingImages, setTrendingImages] = useState<CatalogImage[]>([])
   const router = useRouter()
+  const selectedCounts = useMemo(
+    () =>
+      selectedImages.reduce<Record<string, number>>((acc, code) => {
+        acc[code] = (acc[code] ?? 0) + 1
+        return acc
+      }, {}),
+    [selectedImages],
+  )
+  const selectedItems = useMemo(
+    () =>
+      Object.entries(selectedCounts).map(([code, quantity]) => ({
+        code,
+        quantity,
+      })),
+    [selectedCounts],
+  )
 
   // Constantes para cache
   const CACHE_EXPIRATION = 3600000 // 1 hora em milissegundos
@@ -214,10 +229,16 @@ export default function CatalogPage() {
   useEffect(() => {
     if (customerData && selectedImages.length > 0) {
       localStorage.setItem("selectedImages", JSON.stringify(selectedImages))
-    } else if (!customerData) {
+    } else {
       localStorage.removeItem("selectedImages")
     }
   }, [selectedImages, customerData])
+
+  useEffect(() => {
+    if (!isSelectionComplete) {
+      setIsAware(false)
+    }
+  }, [selectedImages.length])
 
   // Prefetch de itens ausentes no cache ao abrir o modal
   useEffect(() => {
@@ -452,12 +473,29 @@ export default function CatalogPage() {
 
   const handleImageSelect = (imageCode: string) => {
     if (!customerData) return // Não permite seleção no modo de visualização
-
-    if (selectedImages.includes(imageCode)) {
-      setSelectedImages((prev) => prev.filter((code) => code !== imageCode))
-    } else if (selectedImages.length < customerData.quantity) {
+    if (selectedImages.length < customerData.quantity) {
       setSelectedImages((prev) => [...prev, imageCode])
     }
+  }
+
+  const handleQuantityChange = (imageCode: string, delta: 1 | -1) => {
+    if (!customerData) return
+    if (delta === 1) {
+      if (selectedImages.length >= customerData.quantity) return
+      setSelectedImages((prev) => [...prev, imageCode])
+      return
+    }
+    setSelectedImages((prev) => {
+      const index = prev.lastIndexOf(imageCode)
+      if (index === -1) return prev
+      const next = [...prev]
+      next.splice(index, 1)
+      return next
+    })
+  }
+
+  const handleRemoveFromSelection = (imageCode: string) => {
+    setSelectedImages((prev) => prev.filter((code) => code !== imageCode))
   }
 
   const handleConfirmOrder = async () => {
@@ -566,6 +604,7 @@ export default function CatalogPage() {
   }
 
   const isSelectionComplete = customerData ? selectedImages.length === customerData.quantity : false
+  const missingCount = customerData ? Math.max(customerData.quantity - selectedImages.length, 0) : 0
   const filteredCategories = getFilteredCategories()
 
   return (
@@ -630,7 +669,8 @@ export default function CatalogPage() {
               <div className="overflow-x-auto pb-4">
                 <div className="inline-flex gap-3 min-w-full">
                   {trendingImages.map((image) => {
-                    const isSelected = selectedImages.includes(image.code)
+                    const selectionCount = selectedCounts[image.code] ?? 0
+                    const isSelected = selectionCount > 0
                     const isDisabled = !isSelected && selectedImages.length >= (customerData?.quantity ?? 0)
                     return (
                       <Card
@@ -654,8 +694,29 @@ export default function CatalogPage() {
                               <img src="/logo.png" alt="Logo" className="w-24 opacity-40" />
                             </div>
                             {isSelected && (
-                              <div className="absolute inset-0 bg-indigo-500 bg-opacity-20 flex items-center justify-center">
-                                <Check className="w-8 h-8 text-indigo-500" />
+                              <div className="absolute inset-0 bg-indigo-500 bg-opacity-25 flex flex-col items-center justify-center gap-2">
+                                <Check className="w-8 h-8 text-indigo-600" />
+                                <div
+                                  className="pointer-events-auto flex items-center rounded-xl border bg-white px-1 py-1 shadow-sm"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <button
+                                    onClick={() => handleQuantityChange(image.code, -1)}
+                                    className="flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-gray-700 hover:bg-gray-100"
+                                    aria-label={`Diminuir quantidade de ${image.code}`}
+                                  >
+                                    <Minus className="h-4 w-4" />
+                                  </button>
+                                  <span className="min-w-8 px-2 text-center text-sm font-semibold text-gray-800">{selectionCount}</span>
+                                  <button
+                                    onClick={() => handleQuantityChange(image.code, 1)}
+                                    disabled={selectedImages.length >= (customerData?.quantity ?? 0)}
+                                    className="flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                    aria-label={`Aumentar quantidade de ${image.code}`}
+                                  >
+                                    <Plus className="h-4 w-4" />
+                                  </button>
+                                </div>
                               </div>
                             )}
                           </div>
@@ -691,7 +752,8 @@ export default function CatalogPage() {
                   <div className="overflow-x-auto pb-4">
                     <div className="inline-flex gap-3 min-w-full">
                       {categoryImages.map((image) => {
-                        const isSelected = selectedImages.includes(image.code)
+                        const selectionCount = selectedCounts[image.code] ?? 0
+                        const isSelected = selectionCount > 0
                         const isDisabled = !isSelected && selectedImages.length >= (customerData?.quantity ?? 0)
 
                         return (
@@ -720,8 +782,29 @@ export default function CatalogPage() {
                                   />
                                 </div>
                                 {isSelected && (
-                                  <div className="absolute inset-0 bg-indigo-500 bg-opacity-20 flex items-center justify-center">
-                                    <Check className="w-8 h-8 text-indigo-500" />
+                                  <div className="absolute inset-0 bg-indigo-500 bg-opacity-25 flex flex-col items-center justify-center gap-2">
+                                    <Check className="w-8 h-8 text-indigo-600" />
+                                    <div
+                                      className="pointer-events-auto flex items-center rounded-xl border bg-white px-1 py-1 shadow-sm"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <button
+                                        onClick={() => handleQuantityChange(image.code, -1)}
+                                        className="flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-gray-700 hover:bg-gray-100"
+                                        aria-label={`Diminuir quantidade de ${image.code}`}
+                                      >
+                                        <Minus className="h-4 w-4" />
+                                      </button>
+                                      <span className="min-w-8 px-2 text-center text-sm font-semibold text-gray-800">{selectionCount}</span>
+                                      <button
+                                        onClick={() => handleQuantityChange(image.code, 1)}
+                                        disabled={selectedImages.length >= (customerData?.quantity ?? 0)}
+                                        className="flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                        aria-label={`Aumentar quantidade de ${image.code}`}
+                                      >
+                                        <Plus className="h-4 w-4" />
+                                      </button>
+                                    </div>
                                   </div>
                                 )}
                               </div>
@@ -768,7 +851,7 @@ export default function CatalogPage() {
                 </h4>
                 {/* MINIATURAS (GRID COM ROLAGEM VERTICAL) */}
                 <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3 max-h-[50vh] overflow-y-auto px-4 pt-4 pb-32">
-                  {selectedImages.map((imageCode) => {
+                  {selectedItems.map(({ code: imageCode, quantity }) => {
                     const cached = imagesCache[imageCode]
                     const url = cached?.image_url
                     return (
@@ -790,11 +873,14 @@ export default function CatalogPage() {
                           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                             <img src="/logo.png" alt="Logo" className="w-10 sm:w-12 opacity-40" />
                           </div>
+                          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-blue-600 px-2 py-0.5 text-xs font-semibold text-white shadow">
+                            {quantity}x
+                          </div>
                         </div>
 
                         {/* Botão de remover não ultrapassa o card */}
                         <button
-                          onClick={() => handleImageSelect(imageCode)}
+                          onClick={() => handleRemoveFromSelection(imageCode)}
                           className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center transition-colors shadow-md"
                           title="Remover imagem"
                         >
@@ -812,16 +898,22 @@ export default function CatalogPage() {
 
               {/* FOOTER FIXO */}
               <div className="sticky bottom-0 w-full bg-white border-t p-3 sm:p-4">
-                <div className="flex items-start sm:items-center gap-3 px-1 sm:px-2 mb-2">
-                  <Checkbox
-                    id="aware"
-                    checked={isAware}
-                    onCheckedChange={(checked) => setIsAware(checked as boolean)}
-                  />
-                  <label htmlFor="aware" className="text-sm sm:text-base font-medium leading-snug sm:leading-none">
-                    Estou ciente que <strong>NÃO PODEREI ALTERAR</strong> os itens selecionados após a confirmação
-                  </label>
-                </div>
+                {isSelectionComplete ? (
+                  <div className="flex items-start sm:items-center gap-3 px-1 sm:px-2 mb-2">
+                    <Checkbox
+                      id="aware"
+                      checked={isAware}
+                      onCheckedChange={(checked) => setIsAware(checked as boolean)}
+                    />
+                    <label htmlFor="aware" className="text-sm sm:text-base font-medium leading-snug sm:leading-none">
+                      Estou ciente que <strong>NÃO PODEREI ALTERAR</strong> os itens selecionados após a confirmação
+                    </label>
+                  </div>
+                ) : (
+                  <p className="mb-2 px-1 text-sm sm:text-base font-medium">
+                    Você precisa selecionar mais <strong>{missingCount} ITENS</strong> para confirmar o pedido.
+                  </p>
+                )}
                 <Button
                   onClick={handleConfirmOrder}
                   disabled={!isAware || loading || !isSelectionComplete}

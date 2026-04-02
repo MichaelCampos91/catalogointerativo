@@ -83,6 +83,13 @@ function getActiveStatusFilters(statusFilters: Record<OrderStatusFilter, boolean
   return STATUS_OPTIONS.filter((o) => statusFilters[o.key]).map((o) => o.key)
 }
 
+function aggregateImageCounts(images: string[]) {
+  return images.reduce<Record<string, number>>((acc, code) => {
+    acc[code] = (acc[code] ?? 0) + 1
+    return acc
+  }, {})
+}
+
 export default function AdminPage() {
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([])
   const [total, setTotal] = useState(0)
@@ -295,7 +302,10 @@ export default function AdminPage() {
   }
 
   const copyAllImages = (images: string[]) => {
-    const text = images.join("\n")
+    const counts = aggregateImageCounts(images)
+    const text = Object.entries(counts)
+      .map(([code, quantity]) => `${code} x${quantity}`)
+      .join("\n")
     copyToClipboard(text)
   }
 
@@ -1028,12 +1038,13 @@ export default function AdminPage() {
                                     Copiar Lista
                                   </Button>
                                 </div>
-                                {order.selected_images.map((code) => (
+                                {Object.entries(aggregateImageCounts(order.selected_images)).map(([code, quantity]) => (
                                   <DropdownMenuItem
                                     key={code}
                                     className="flex items-center justify-between"
                                   >
                                     <span className="truncate">{code}</span>
+                                    <Badge variant="outline" className="ml-2">x{quantity}</Badge>
                                   </DropdownMenuItem>
                                 ))}
                               </DropdownMenuContent>

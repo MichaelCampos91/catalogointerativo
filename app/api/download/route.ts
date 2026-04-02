@@ -85,13 +85,28 @@ export async function POST(request: Request) {
       console.warn('⚠️ Limite de 5000 arquivos atingido na listagem. Alguns arquivos podem não estar disponíveis.')
     }
 
-    // Filtrar apenas os arquivos selecionados por código (basename sem extensão)
-    const wanted = new Set<string>(selectedImages || [])
-    const matches = allObjects.filter((obj) => {
+    const requestedCodes: string[] = Array.isArray(selectedImages)
+      ? selectedImages.filter((code): code is string => typeof code === "string" && !!code.trim())
+      : []
+
+    if (requestedCodes.length === 0) {
+      return NextResponse.json({ error: "Nenhum item selecionado para download" }, { status: 400 })
+    }
+
+    // Indexar arquivos do bucket por código (basename sem extensão)
+    const objectsByCode = new Map<string, { Key: string }>()
+    allObjects.forEach((obj) => {
       const fileName = path.basename(obj.Key)
       const code = path.parse(fileName).name
-      return wanted.has(code)
+      if (!objectsByCode.has(code)) {
+        objectsByCode.set(code, obj)
+      }
     })
+
+    const missingCodes = requestedCodes.filter((code) => !objectsByCode.has(code))
+    const matches = requestedCodes
+      .map((code) => ({ code, obj: objectsByCode.get(code) }))
+      .filter((item): item is { code: string; obj: { Key: string } } => !!item.obj)
 
     if (matches.length === 0) {
       return NextResponse.json(
@@ -104,10 +119,8 @@ export async function POST(request: Request) {
     }
     
     // Verificar se todos os arquivos solicitados foram encontrados
-    if (matches.length < wanted.size) {
-      const foundCodes = new Set(matches.map(obj => path.parse(path.basename(obj.Key)).name))
-      const missing = Array.from(wanted).filter(code => !foundCodes.has(code))
-      console.warn('⚠️ Alguns arquivos não foram encontrados:', missing)
+    if (missingCodes.length > 0) {
+      console.warn("⚠️ Alguns arquivos não foram encontrados:", missingCodes)
     }
 
     // Criar ZIP em streaming diretamente para a resposta
@@ -115,23 +128,25 @@ export async function POST(request: Request) {
     const pass = new PassThrough()
     archive.pipe(pass)
 
-    // Adicionar arquivos do R2 diretamente ao ZIP (sem subpastas) ignorando duplicatas
-    const usedNames = new Set<string>()
+    // Adicionar arquivos ao ZIP preservando quantidades repetidas
+    const usedNames: Record<string, number> = {}
     const warnings: string[] = []
+    if (missingCodes.length > 0) {
+      warnings.push(`Alguns itens não foram encontrados no catálogo: ${missingCodes.join(", ")}`)
+    }
 
     // Processar arquivos e adicionar ao ZIP
-    for (const obj of matches) {
-      const flatName = path.basename(obj.Key) // remove subpastas, mantém extensão
-      if (usedNames.has(flatName)) {
-        warnings.push(`⚠️ Existiam 2 arquivos com mesmo nome + ${flatName}. O segundo arquivo foi removido da lista.`)
-        continue
-      }
-      usedNames.add(flatName)
+    for (const item of matches) {
+      const flatName = path.basename(item.obj.Key)
+      const parsedName = path.parse(flatName)
+      usedNames[flatName] = (usedNames[flatName] ?? 0) + 1
+      const suffix = usedNames[flatName] > 1 ? `_${usedNames[flatName]}` : ""
+      const zipName = `${parsedName.name}${suffix}${parsedName.ext}`
       
       // Obter objeto do R2
       const getCommand = new GetObjectCommand({
         Bucket: bucketName,
-        Key: obj.Key,
+        Key: item.obj.Key,
       })
       
       const response = await s3Client.send(getCommand)
@@ -147,7 +162,7 @@ export async function POST(request: Request) {
         }
         
         const buffer = Buffer.concat(chunks)
-        archive.append(buffer, { name: flatName })
+        archive.append(buffer, { name: zipName })
       }
     }
 

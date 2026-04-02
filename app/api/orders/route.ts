@@ -5,10 +5,38 @@ import type { OrderStatusFilter } from "@/lib/database"
 import { normalizePeriodField } from "@/lib/database"
 import { requireAuth, authErrorResponse } from "@/lib/auth"
 
+function validateCreateOrderPayload(body: unknown): { valid: true } | { valid: false; message: string } {
+  if (!body || typeof body !== "object") {
+    return { valid: false, message: "Payload inválido" }
+  }
+
+  const payload = body as Record<string, unknown>
+  const quantity = payload.quantity_purchased
+  const selectedImages = payload.selected_images
+
+  if (!Number.isInteger(quantity) || Number(quantity) <= 0) {
+    return { valid: false, message: "quantity_purchased deve ser um número inteiro maior que zero" }
+  }
+
+  if (!Array.isArray(selectedImages) || selectedImages.some((item) => typeof item !== "string" || !item.trim())) {
+    return { valid: false, message: "selected_images deve ser um array de códigos válidos" }
+  }
+
+  if (selectedImages.length !== Number(quantity)) {
+    return { valid: false, message: "A quantidade de itens selecionados deve ser igual à quantidade do pedido" }
+  }
+
+  return { valid: true }
+}
+
 export async function POST(request: Request) {
   try {
     console.log("API: Criando novo pedido...")
     const body = await request.json()
+    const validation = validateCreateOrderPayload(body)
+    if (!validation.valid) {
+      return NextResponse.json({ error: validation.message }, { status: 400 })
+    }
     const order = await createOrder(body)
     console.log("API: Pedido criado com sucesso")
     return NextResponse.json(order)

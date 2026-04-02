@@ -250,7 +250,7 @@ export default function ConfirmedPage() {
           <CardContent>
             <div className="grid grid-cols-3 md:grid-cols-4 gap-4 max-h-96 overflow-y-auto">
               {imageUrls.map((image, index) => (
-                <Card key={index} className="overflow-hidden">
+                <Card key={`${image.code}-${index}`} className="overflow-hidden">
                   <CardContent className="p-0">
                     <div className="relative aspect-square">
                       <img

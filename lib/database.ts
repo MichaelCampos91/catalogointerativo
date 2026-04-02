@@ -499,6 +499,19 @@ export async function getTrendingImageCodes(
 export async function createOrder(order: CreateOrder): Promise<Order> {
   let client
   try {
+    if (!Number.isInteger(order.quantity_purchased) || order.quantity_purchased <= 0) {
+      throw new Error("Quantidade do pedido inválida")
+    }
+    if (
+      !Array.isArray(order.selected_images) ||
+      order.selected_images.some((item) => typeof item !== "string" || !item.trim())
+    ) {
+      throw new Error("Itens selecionados inválidos")
+    }
+    if (order.selected_images.length !== order.quantity_purchased) {
+      throw new Error("A quantidade de itens selecionados deve ser igual à quantidade do pedido")
+    }
+
     // Verifica se já existe um pedido com o mesmo número
     const orderExists = await checkOrderExists(order.order)
     if (orderExists) {
