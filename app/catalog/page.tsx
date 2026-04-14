@@ -47,6 +47,12 @@ export default function CatalogPage() {
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
+  const [isIncreaseConfirmOpen, setIsIncreaseConfirmOpen] = useState(false)
+  const [pendingIncrease, setPendingIncrease] = useState<{
+    imageCode: string
+    currentQty: number
+    nextQty: number
+  } | null>(null)
   const [isAware, setIsAware] = useState(false)
   const [pagination, setPagination] = useState<PaginationInfo>({
     total: 0,
@@ -75,6 +81,15 @@ export default function CatalogPage() {
       })),
     [selectedCounts],
   )
+  const increasePreviewImageUrl = useMemo(() => {
+    if (!pendingIncrease) return null
+    const cachedUrl = imagesCache[pendingIncrease.imageCode]?.image_url
+    if (cachedUrl) return cachedUrl
+    const fromImages = images.find((img) => img.code === pendingIncrease.imageCode)?.image_url
+    if (fromImages) return fromImages
+    const fromTrending = trendingImages.find((img) => img.code === pendingIncrease.imageCode)?.image_url
+    return fromTrending ?? null
+  }, [pendingIncrease, imagesCache, images, trendingImages])
 
   // Constantes para cache
   const CACHE_EXPIRATION = 3600000 // 1 hora em milissegundos
@@ -482,6 +497,16 @@ export default function CatalogPage() {
     if (!customerData) return
     if (delta === 1) {
       if (selectedImages.length >= customerData.quantity) return
+      const currentQty = selectedCounts[imageCode] ?? 0
+      if (currentQty >= 1) {
+        setPendingIncrease({
+          imageCode,
+          currentQty,
+          nextQty: currentQty + 1,
+        })
+        setIsIncreaseConfirmOpen(true)
+        return
+      }
       setSelectedImages((prev) => [...prev, imageCode])
       return
     }
@@ -492,6 +517,21 @@ export default function CatalogPage() {
       next.splice(index, 1)
       return next
     })
+  }
+
+  const handleCancelIncrease = () => {
+    setIsIncreaseConfirmOpen(false)
+    setPendingIncrease(null)
+  }
+
+  const handleConfirmIncrease = () => {
+    if (!customerData || !pendingIncrease) return
+    setSelectedImages((prev) => {
+      if (prev.length >= customerData.quantity) return prev
+      return [...prev, pendingIncrease.imageCode]
+    })
+    setIsIncreaseConfirmOpen(false)
+    setPendingIncrease(null)
   }
 
   const handleRemoveFromSelection = (imageCode: string) => {
@@ -829,6 +869,63 @@ export default function CatalogPage() {
             <p className="text-sm text-gray-500 mt-2">Carregando mais imagens...</p>
           </div>
         )}
+
+        {/* Modal de confirmação de aumento de quantidade */}
+        <Dialog
+          open={isIncreaseConfirmOpen}
+          onOpenChange={(open) => {
+            if (open) setIsIncreaseConfirmOpen(true)
+          }}
+        >
+          <DialogContent
+            className="w-[95vw] max-w-2xl p-6 [&>button]:hidden"
+            onInteractOutside={(event) => event.preventDefault()}
+            onEscapeKeyDown={(event) => event.preventDefault()}
+          >
+            <div className="flex flex-col items-center text-center gap-5">
+              <AlertTriangle className="w-16 h-16 text-yellow-500" />
+
+              <p className="text-base sm:text-lg font-semibold">
+                ATENCAO, VOCE ESTA SELECIONANDO{" "}
+                <strong>{pendingIncrease?.nextQty ?? 0} UNIDADES</strong> DO MESMO ITEM.
+              </p>
+
+              <div className="flex flex-wrap justify-center gap-3">
+                {pendingIncrease &&
+                  Array.from({ length: pendingIncrease.nextQty }, (_, index) => (
+                    <div key={`${pendingIncrease.imageCode}-${index}`} className="w-20 h-20 rounded-md overflow-hidden border bg-gray-100 relative">
+                      {increasePreviewImageUrl ? (
+                        <img
+                          src={increasePreviewImageUrl}
+                          alt={pendingIncrease.imageCode}
+                          className="w-full h-full object-cover"
+                          onContextMenu={(e) => e.preventDefault()}
+                          draggable={false}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-[11px] font-medium text-gray-600 px-1">
+                          {pendingIncrease.imageCode}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+              </div>
+
+              <p className="text-sm sm:text-base font-medium">
+                SE TIVER CERTEZA, CLIQUE PARA CONFIRMAR.
+              </p>
+
+              <div className="flex items-center justify-center gap-2">
+                <Button type="button" variant="outline" onClick={handleCancelIncrease}>
+                  CANCELAR
+                </Button>
+                <Button type="button" onClick={handleConfirmIncrease}>
+                  CONFIRMAR
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Modal de Confirmação */}
         <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
