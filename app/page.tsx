@@ -1,178 +1,140 @@
 "use client"
 
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ShoppingBag, User, Lock } from "lucide-react"
-import { useRouter } from "next/navigation"
-import { Suspense } from "react"
-import { CustomerInitializer } from "@/components/CustomerInitializer"
-import Image from "next/image"
-import { MEASURE_BY_QUANTITY } from "./admin/measurements"
+import { Suspense, useEffect, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { Card, CardContent } from "@/components/ui/card"
+import { Unlink } from "lucide-react"
 
-export default function HomePage() {
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '/catalogointerativo'
-  const [customerName, setCustomerName] = useState("")
-  const [orderNumber, setOrderNumber] = useState("")
-  const [quantity, setQuantity] = useState("")
-  const [isLocked, setIsLocked] = useState(false)
-  const [isFromUrl, setIsFromUrl] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
+type ValidationState =
+  | { status: "loading" }
+  | { status: "no_params" }
+  | { status: "invalid"; reason?: string }
+
+function ClientLandingInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const [state, setState] = useState<ValidationState>({ status: "loading" })
 
-  const handleStart = async () => {
-    try {
-      setError(null)
-      setIsLoading(true)
-      
-      // Validações mais detalhadas
-      if (!customerName.trim()) {
-        setError("Por favor, insira seu nome")
-        setIsLoading(false)
-        return
-      }
-      
-      if (!orderNumber.trim()) {
-        setError("Por favor, insira o número do pedido")
-        setIsLoading(false)
-        return
-      }
-      
-      if (!quantity) {
-        setError("Por favor, selecione a quantidade de produtos")
-        setIsLoading(false)
-        return
-      }
+  useEffect(() => {
+    const name = (searchParams.get("nome") ?? "").trim()
+    const orderNumber = (searchParams.get("pedido") ?? "").trim()
+    const quantityStr = (searchParams.get("quantidade") ?? "").trim()
 
-      // Se vier via GET params, não precisa verificar isLocked
-      if (!isFromUrl && isLocked) {
-        setError("Sessão já iniciada. Por favor, aguarde.")
-        setIsLoading(false)
-        return
-      } 
-
-      // Salvar dados no localStorage
-      const customerData = {
-        name: customerName.trim(),
-        orderNumber: orderNumber.trim(),
-        quantity: Number.parseInt(quantity),
-        timestamp: new Date().toISOString()
-      }
-
-      localStorage.setItem("customerData", JSON.stringify(customerData))
-      localStorage.setItem("sessionLocked", "true")
-      
-      // Navegar para o catálogo
-      await router.push("/catalog")
-    } catch (err) {
-      setError("Ocorreu um erro ao iniciar a sessão. Por favor, tente novamente.")
-      console.error("Erro ao iniciar sessão:", err)
-      setIsLoading(false)
+    // Sem params: cliente está apenas visualizando o catálogo.
+    if (!name && !orderNumber && !quantityStr) {
+      setState({ status: "no_params" })
+      router.replace("/catalog")
+      return
     }
+
+    const quantity = Number.parseInt(quantityStr, 10)
+    if (!name || !orderNumber || !Number.isInteger(quantity) || quantity <= 0) {
+      setState({ status: "invalid", reason: "params" })
+      return
+    }
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch("/api/order-links/validate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, orderNumber, quantity }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (cancelled) return
+
+        if (data.result === "allowed") {
+          // Persistência por pedido (carrinho permanece entre acessos do mesmo link).
+          const customerData = {
+            name,
+            orderNumber,
+            quantity,
+            timestamp: new Date().toISOString(),
+          }
+          try {
+            const previousRaw = localStorage.getItem("customerData")
+            const previous = previousRaw ? JSON.parse(previousRaw) : null
+            if (previous && previous.orderNumber && previous.orderNumber !== orderNumber) {
+              // Trocou de link: limpa carrinho e timer do pedido anterior.
+              localStorage.removeItem(`selectedImages:${previous.orderNumber}`)
+              localStorage.removeItem(`catalogTimer:${previous.orderNumber}`)
+              localStorage.removeItem(`imageCache:${previous.orderNumber}`)
+            }
+          } catch {
+            // localStorage indisponível: ignora.
+          }
+          localStorage.setItem("customerData", JSON.stringify(customerData))
+          localStorage.setItem("sessionLocked", "true")
+          router.replace("/catalog")
+          return
+        }
+
+        if (data.result === "confirmed") {
+          router.replace(`/confirmed/${encodeURIComponent(orderNumber)}`)
+          return
+        }
+
+        setState({ status: "invalid", reason: data.reason })
+      } catch (error) {
+        console.error("Erro ao validar link:", error)
+        if (!cancelled) {
+          setState({ status: "invalid", reason: "network" })
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
+  if (state.status === "invalid") {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+        <Card className="w-full max-w-md">
+          <CardContent className="p-8 text-center space-y-4">
+            <div className="flex justify-center">
+              <img src="/logo.png" alt="Logo" className="w-[150px]" />
+            </div>
+            <div className="flex justify-center">
+              <Unlink className="w-12 h-12 text-red-500" />
+            </div>
+            <h1 className="text-xl font-bold text-gray-900">URL Inválida</h1>
+            <p className="text-sm text-gray-600">
+              Esta URL não é válida ou não está mais disponível. Verifique o link
+              recebido ou entre em contato com a Cenario.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
-  const appName = process.env.NEXT_PUBLIC_APP_NAME || "Catálogo Interativo"
-  const isFormValid = Boolean(customerName && orderNumber && quantity)
-
   return (
-    <Suspense fallback={null}>
-      <CustomerInitializer
-        onLoad={(data) => {
-          setCustomerName(data.name)
-          setOrderNumber(data.orderNumber)
-          setQuantity(data.quantity.toString())
-          setIsLocked(true)
-          setIsFromUrl(data.isFromUrl)
-        }}
-      />
-
-      <div className="min-h-screen bg-gray-100">
-        <div className="max-w-md mx-auto pt-8">
-          <div className="text-center mb-8">
-            <div className="w-[150px] flex items-center justify-center mx-auto mb-4">
-              <img className="w-[150px]" src="/logo.png" alt="Logo"/>
-            </div>
-          </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center justify-center gap-2">
-                <User className="w-5 h-5" />
-                Informações Iniciais
-                {isLocked && <Lock className="w-4 h-4 text-gray-400" />}
-              </CardTitle>
-              <CardDescription className="text-center">
-                {isLocked
-                  ? "Informações carregadas automaticamente"
-                  : "Clique no botão abaixo para acessar o catálogo"}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Seu nome</Label>
-                <Input
-                  id="name"
-                  placeholder="Digite seu nome completo"
-                  value={customerName}
-                  onChange={(e) => !isLocked && setCustomerName(e.target.value)}
-                  disabled={isLocked}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="orderNumber">Número do Pedido</Label>
-                <Input
-                  id="orderNumber"
-                  placeholder="Digite o número do pedido"
-                  value={orderNumber}
-                  onChange={(e) => !isLocked && setOrderNumber(e.target.value)}
-                  disabled={isLocked}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="quantity">Quantidade de Itens do pedido:</Label>
-                <Select
-                  value={quantity}
-                  onValueChange={(value) => !isLocked && setQuantity(value)}
-                  disabled={isLocked}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione a quantidade" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.keys(MEASURE_BY_QUANTITY)
-                      .map((key) => Number(key))
-                      .sort((a, b) => a - b)
-                      .map((num) => (
-                        <SelectItem key={num} value={num.toString()}>
-                          {num} {num === 1 ? "produto" : "produtos"}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <Button
-                onClick={handleStart}
-                disabled={!isFormValid || isLoading}
-                className="w-full bg-primary text-primary-foreground"
-                size="lg"
-              >
-                {isLoading ? "Aguarde..." : "Acessar Catálogo"}
-              </Button>
-
-              {error && (
-                <p className="text-sm text-red-500 mt-2">{error}</p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+        <p className="text-sm text-gray-600">Carregando...</p>
       </div>
+    </div>
+  )
+}
+
+export default function HomePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+            <p className="text-sm text-gray-600">Carregando...</p>
+          </div>
+        </div>
+      }
+    >
+      <ClientLandingInner />
     </Suspense>
   )
 }

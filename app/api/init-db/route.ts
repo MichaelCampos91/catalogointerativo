@@ -125,6 +125,46 @@ export async function POST() {
     `)
     console.log("API: Tabelas production_batches e production_batch_orders criadas/verificadas")
 
+    // Tabela order_links: registro de links gerados pelo admin (controle de acesso ao modo pedido)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS order_links (
+        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+        customer_name TEXT NOT NULL,
+        order_number TEXT NOT NULL UNIQUE,
+        quantity INTEGER NOT NULL CHECK (quantity > 0),
+        message TEXT,
+        message_template TEXT,
+        generated_url TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        confirmed_at TIMESTAMP WITH TIME ZONE,
+        order_id UUID REFERENCES orders(id) ON DELETE SET NULL
+      );
+    `)
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_order_links_status ON order_links(status);`)
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_order_links_customer ON order_links(customer_name);`)
+    console.log("API: Tabela order_links criada/verificada")
+
+    // Tabela app_settings: configurações simples chave/valor (ex.: template padrão da mensagem)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `)
+    await client.query(
+      `INSERT INTO app_settings(key, value)
+       VALUES ($1, $2)
+       ON CONFLICT (key) DO NOTHING`,
+      [
+        "default_link_message",
+        "Olá! Aqui está o link para escolher os itens do seu pedido na nossa galeria: {{link gerado}}",
+      ]
+    )
+    console.log("API: Tabela app_settings criada/verificada (com seed default_link_message)")
+
     // Inserir dados de exemplo apenas se não existirem
     const categoriesCount = await client.query("SELECT COUNT(*) FROM categories")
     if (Number.parseInt(categoriesCount.rows[0].count) === 0) {

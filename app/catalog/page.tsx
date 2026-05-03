@@ -159,13 +159,14 @@ export default function CatalogPage() {
   useEffect(() => {
     // Limpar caches expirados ao inicializar
     cleanupExpiredCaches()
-    
+
     const data = localStorage.getItem("customerData")
+    let parsed: { name: string; orderNumber: string; quantity: number } | null = null
     if (data) {
-      const parsed = JSON.parse(data)
+      parsed = JSON.parse(data)
       setCustomerData(parsed)
       // Limpar caches de pedidos diferentes e carregar cache do pedido atual
-      const currentCacheKey = `imageCache:${parsed.orderNumber}`
+      const currentCacheKey = `imageCache:${parsed!.orderNumber}`
       const keysToRemove: string[] = []
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i)
@@ -174,18 +175,38 @@ export default function CatalogPage() {
         }
       }
       keysToRemove.forEach((k) => localStorage.removeItem(k))
-      
+
       // Carregar cache válido de imagens
       const cachedImages = getValidCache<Record<string, { code: string; image_url: string; category_id: string }>>(currentCacheKey)
       if (cachedImages) {
         setImagesCache(cachedImages)
       }
     }
-  
-    // Carregar itens selecionados do localStorage
-    const savedSelectedImages = localStorage.getItem("selectedImages")
-    if (savedSelectedImages) {
-      setSelectedImages(JSON.parse(savedSelectedImages))
+
+    // Carregar itens selecionados do pedido atual (chave por orderNumber).
+    // Compatibilidade: migra `selectedImages` legado se existir.
+    if (parsed?.orderNumber) {
+      const savedSelectedImages = localStorage.getItem(`selectedImages:${parsed.orderNumber}`)
+      if (savedSelectedImages) {
+        setSelectedImages(JSON.parse(savedSelectedImages))
+      } else {
+        const legacy = localStorage.getItem("selectedImages")
+        if (legacy) {
+          try {
+            const arr = JSON.parse(legacy)
+            if (Array.isArray(arr) && arr.length > 0) {
+              setSelectedImages(arr)
+              localStorage.setItem(`selectedImages:${parsed.orderNumber}`, legacy)
+            }
+          } catch {
+            // ignora payload legado inválido
+          }
+          localStorage.removeItem("selectedImages")
+        }
+      }
+    } else {
+      // Modo visualização não persiste seleção (não pode selecionar).
+      localStorage.removeItem("selectedImages")
     }
 
     loadCatalogData()
@@ -210,9 +231,20 @@ export default function CatalogPage() {
       }
     })()
 
-    // Inicializar o cronômetro apenas se houver dados do cliente
-    if (data) {
-      const savedTime = localStorage.getItem("catalogTimer")
+    // Inicializar o cronômetro apenas se houver dados do cliente.
+    // Chaveado por orderNumber para preservar entre acessos do mesmo link.
+    if (parsed?.orderNumber) {
+      const timerKey = `catalogTimer:${parsed.orderNumber}`
+      let savedTime = localStorage.getItem(timerKey)
+      // Migração suave do timer global legado para o keyado por pedido.
+      if (!savedTime) {
+        const legacy = localStorage.getItem("catalogTimer")
+        if (legacy) {
+          savedTime = legacy
+          localStorage.setItem(timerKey, legacy)
+        }
+        localStorage.removeItem("catalogTimer")
+      }
       if (savedTime) {
         const endTime = parseInt(savedTime)
         const now = Math.floor(Date.now() / 1000)
@@ -220,10 +252,53 @@ export default function CatalogPage() {
         setTimeLeft(remaining)
       } else {
         const endTime = Math.floor(Date.now() / 1000) + (2 * 60 * 60)
-        localStorage.setItem("catalogTimer", endTime.toString())
+        localStorage.setItem(timerKey, endTime.toString())
       }
     }
   }, [])
+
+  // Validação em background: garante que somente links válidos/pendentes acessem o modo pedido.
+  useEffect(() => {
+    if (!customerData) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch("/api/order-links/validate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: customerData.name,
+            orderNumber: customerData.orderNumber,
+            quantity: customerData.quantity,
+          }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (cancelled) return
+        if (data.result === "confirmed") {
+          // Link já confirmado (ou pedido legado): redireciona para /confirmed.
+          router.replace(`/confirmed/${encodeURIComponent(customerData.orderNumber)}`)
+        } else if (data.result === "invalid") {
+          // Link inválido / dados manipulados: limpa sessão e volta à raiz.
+          try {
+            localStorage.removeItem("customerData")
+            localStorage.removeItem("sessionLocked")
+            localStorage.removeItem(`selectedImages:${customerData.orderNumber}`)
+            localStorage.removeItem(`catalogTimer:${customerData.orderNumber}`)
+          } catch {
+            // localStorage indisponível
+          }
+          router.replace("/")
+        }
+      } catch (error) {
+        // Falha de rede: mantém o modo atual (UX mais tolerante; servidor revalida na confirmação).
+        console.warn("Validação de link em background falhou:", error)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerData?.orderNumber])
 
   // Efeito para atualizar o cronômetro
   useEffect(() => {
@@ -240,12 +315,14 @@ export default function CatalogPage() {
     return () => clearInterval(timer)
   }, [])
 
-  // Efeito para salvar itens selecionados no localStorage
+  // Efeito para salvar itens selecionados no localStorage (chave por orderNumber)
   useEffect(() => {
-    if (customerData && selectedImages.length > 0) {
-      localStorage.setItem("selectedImages", JSON.stringify(selectedImages))
+    if (!customerData?.orderNumber) return
+    const key = `selectedImages:${customerData.orderNumber}`
+    if (selectedImages.length > 0) {
+      localStorage.setItem(key, JSON.stringify(selectedImages))
     } else {
-      localStorage.removeItem("selectedImages")
+      localStorage.removeItem(key)
     }
   }, [selectedImages, customerData])
 
@@ -566,15 +643,25 @@ export default function CatalogPage() {
         throw new Error(errorData.message || "Erro ao salvar pedido")
       }
 
-      // Limpar localStorage
+      // Sinaliza para a página /confirmed que esta é a primeira visita logo após
+      // a confirmação (o banner "já confirmado" não deve aparecer agora).
+      try {
+        localStorage.setItem(`justConfirmed:${customerData.orderNumber}`, "1")
+      } catch {
+        // localStorage indisponível: sem sinal, banner aparece (UX aceitável).
+      }
+
+      // Limpar localStorage (chaves keyadas por orderNumber + chaves globais)
       localStorage.removeItem("customerData")
       localStorage.removeItem("sessionLocked")
       localStorage.removeItem("selectedImages")
       localStorage.removeItem("catalogTimer")
       if (customerData?.orderNumber) {
+        localStorage.removeItem(`selectedImages:${customerData.orderNumber}`)
+        localStorage.removeItem(`catalogTimer:${customerData.orderNumber}`)
         localStorage.removeItem(`imageCache:${customerData.orderNumber}`)
       }
- 
+
       // Limpar estado local
       setCustomerData(null)
       setSelectedImages([])
@@ -582,7 +669,7 @@ export default function CatalogPage() {
       setImagesCache({})
 
       toast.success("Seu pedido foi confirmado! Conheça outros produtos em nossa loja...")
-      
+
       // Fechar o modal
       setShowConfirmDialog(false)
       setIsAware(false)

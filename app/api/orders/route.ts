@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
-import { createOrder, getOrders, updateOrderStatus, getOrdersByOrderNumber, markOrdersInProduction, finalizeOrders, getOrderById, getOrdersByIds, cancelOrder, getOrdersFiltered, getOrderIdsFiltered, createProductionBatch } from "@/lib/database"
+import { createOrderWithLinkConfirmation, getOrders, updateOrderStatus, getOrdersByOrderNumber, markOrdersInProduction, finalizeOrders, getOrderById, getOrdersByIds, cancelOrder, getOrdersFiltered, getOrderIdsFiltered, createProductionBatch } from "@/lib/database"
 import type { OrderStatusFilter } from "@/lib/database"
 import { normalizePeriodField } from "@/lib/database"
 import { requireAuth, authErrorResponse } from "@/lib/auth"
@@ -37,19 +37,21 @@ export async function POST(request: Request) {
     if (!validation.valid) {
       return NextResponse.json({ error: validation.message }, { status: 400 })
     }
-    const order = await createOrder(body)
+    const { order } = await createOrderWithLinkConfirmation(body)
     console.log("API: Pedido criado com sucesso")
     return NextResponse.json(order)
   } catch (error) {
     console.error("API: Erro ao criar pedido:", error)
-    // Garantir que sempre retornamos JSON válido mesmo em caso de erro
+    const message = error instanceof Error ? error.message : "Erro desconhecido"
+    // Erros de regra de negócio retornam 400 para o cliente exibir mensagem amigável
+    const isClientError = /já foi confirmado|já existe|não confere|inválid|obrigatóri/i.test(message)
     return NextResponse.json(
       {
-        error: "Erro interno do servidor",
-        message: error instanceof Error ? error.message : "Erro desconhecido",
+        error: isClientError ? message : "Erro interno do servidor",
+        message,
         timestamp: new Date().toISOString(),
       },
-      { status: 500 },
+      { status: isClientError ? 400 : 500 },
     )
   }
 }

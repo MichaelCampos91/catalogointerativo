@@ -3,10 +3,10 @@
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, Calendar, User, Package, CheckCircle } from "lucide-react"
+import { Calendar, User, Package, CheckCircle, ListOrdered, AlertCircle } from "lucide-react"
 import { useRouter, useParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { toast } from "sonner"
+import { resolveImageUrls, PLACEHOLDER_IMAGE_URL } from "@/lib/image-urls"
 
 type Order = {
   id: string
@@ -29,6 +29,7 @@ export default function ConfirmedPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [imageUrls, setImageUrls] = useState<ImageUrl[]>([])
+  const [showAlreadyConfirmedBanner, setShowAlreadyConfirmedBanner] = useState(false)
   const router = useRouter()
   const params = useParams()
   const orderNumber = params.orderNumber as string
@@ -38,26 +39,38 @@ export default function ConfirmedPage() {
       try {
         setLoading(true)
         const response = await fetch(`/api/orders?order=${encodeURIComponent(orderNumber)}`)
-        
+
         if (!response.ok) {
           throw new Error("Pedido não encontrado")
         }
-        
+
         const data = await response.json()
-        
+
         if (data.length === 0) {
           setError("Pedido não encontrado")
           return
         }
-        
+
         const orderData = data[0]
         setOrder(orderData)
-        
-        // Carregar URLs das imagens
-        if (orderData.selected_images && orderData.selected_images.length > 0) {
-          await loadImageUrls(orderData.selected_images)
+
+        // Banner "já confirmado" só aparece quando NÃO é a primeira visita logo após confirmação.
+        try {
+          const justConfirmed = localStorage.getItem(`justConfirmed:${orderNumber}`)
+          if (justConfirmed) {
+            localStorage.removeItem(`justConfirmed:${orderNumber}`)
+            setShowAlreadyConfirmedBanner(false)
+          } else {
+            setShowAlreadyConfirmedBanner(true)
+          }
+        } catch {
+          setShowAlreadyConfirmedBanner(true)
         }
-        
+
+        if (orderData.selected_images && orderData.selected_images.length > 0) {
+          const map = await resolveImageUrls(orderData.selected_images)
+          setImageUrls(orderData.selected_images.map((code: string) => ({ code, url: map[code] ?? PLACEHOLDER_IMAGE_URL })))
+        }
       } catch (error) {
         console.error("Erro ao carregar pedido:", error)
         setError(error instanceof Error ? error.message : "Erro ao carregar pedido")
@@ -75,72 +88,19 @@ export default function ConfirmedPage() {
     return new Date(dateString).toLocaleString("pt-BR")
   }
 
-  const getImageUrl = (imageCode: string) => {
-    const basePath = process.env.NEXT_PUBLIC_BASE_PATH || ""
-    // Remover extensão se existir para construir a URL corretamente
-    const cleanCode = imageCode.replace(/\.(jpg|jpeg|png|gif|webp)$/i, '')
-    // Remover pontos extras no final também
-    const finalCode = cleanCode.replace(/\.+$/, '')
-    return `${basePath}/files/${finalCode}.jpg`
-  }
-
-  const PLACEHOLDER_URL = "/files/Z/placeholder.svg"
-
-  const loadImageUrls = async (imageCodes: string[]) => {
-    try {
-      // Buscar lista completa no endpoint público de catálogo (mesma lógica do /catalog)
-      const res = await fetch(`/api/public-catalog?all=true&limit=9999&page=1`)
-      if (!res.ok) throw new Error('Falha ao listar arquivos')
-      const j = await res.json()
-
-      // Mapear code -> url a partir de `images` e `categories[*].images`
-      const codeToUrl: Record<string, string> = {}
-      if (Array.isArray(j.images)) {
-        for (const img of j.images) {
-          if (img && img.code && img.url) codeToUrl[img.code] = img.url
-        }
-      }
-      if (Array.isArray(j.categories)) {
-        for (const cat of j.categories) {
-          if (cat && Array.isArray(cat.images)) {
-            for (const img of cat.images) {
-              if (img && img.code && img.url) codeToUrl[img.code] = img.url
-            }
-          }
-        }
-      }
-
-      console.log('[CONFIRMED] Códigos buscados do pedido:', imageCodes)
-      console.log('[CONFIRMED] Mapeamento codeToUrl montado:', codeToUrl)
-
-      const urls: ImageUrl[] = imageCodes.map((code) => {
-        return { code, url: codeToUrl[code] || PLACEHOLDER_URL }
-      })
-      
-      console.log('[CONFIRMED] URLs finais montadas:', urls)
-      setImageUrls(urls)
-    } catch (e) {
-      // Fallback: tentar endpoint legado por código
-      try {
-        const urls: ImageUrl[] = await Promise.all(
-          imageCodes.map(async (code) => {
-            try {
-              const r = await fetch(`/api/images?code=${encodeURIComponent(code)}`)
-              if (r.ok) {
-                const d = await r.json()
-                return { code, url: d.url }
-              }
-            } catch {}
-            return { code, url: PLACEHOLDER_URL }
-          })
-        )
-        setImageUrls(urls)
-      } catch (error) {
-        console.error('Erro ao carregar URLs das imagens:', error)
-        const urls = imageCodes.map((code) => ({ code, url: PLACEHOLDER_URL }))
-        setImageUrls(urls)
-      }
-    }
+  const formatBannerDate = (dateString: string) => {
+    const d = new Date(dateString)
+    const date = new Intl.DateTimeFormat("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(d)
+    const time = new Intl.DateTimeFormat("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(d)
+    return `${date}, ${time}h`
   }
 
   if (loading) {
@@ -159,7 +119,7 @@ export default function ConfirmedPage() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <Card className="w-full max-w-md">
           <CardContent className="p-6 text-center">
-            <CheckCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+            <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
             <h2 className="text-xl font-bold mb-2">Erro ao Carregar Pedido</h2>
             <p className="text-gray-600 mb-4">{error || "Pedido não encontrado"}</p>
           </CardContent>
@@ -171,11 +131,31 @@ export default function ConfirmedPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-4xl mx-auto p-4">
+        {/* Banner de pedido já confirmado (só em revisitas) */}
+        {showAlreadyConfirmedBanner && (
+          <div className="mb-4 rounded-md border border-yellow-300 bg-yellow-50 p-4 text-yellow-900 shadow-sm">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0 text-yellow-600" />
+              <div className="space-y-1">
+                <p className="font-semibold">Este pedido já foi confirmado e não pode ser alterado.</p>
+                <p className="text-sm">Data da confirmação: {formatBannerDate(order.created_at)}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-4">
             <img className="w-[120px]" src="/logo.png" alt="Logo"/>
           </div>
+          <Button
+            variant="outline"
+            onClick={() => router.push(`/orders/${encodeURIComponent(order.customer_name)}`)}
+          >
+            <ListOrdered className="w-4 h-4 mr-2" />
+            Ver todos os meus pedidos
+          </Button>
         </div>
 
         {/* Card de confirmação */}
@@ -258,15 +238,15 @@ export default function ConfirmedPage() {
                         alt={image.code}
                         className="object-cover w-full h-full"
                         onError={(e) => {
-                          if (e.currentTarget.src !== window.location.origin + PLACEHOLDER_URL) {
-                            e.currentTarget.src = PLACEHOLDER_URL
+                          if (e.currentTarget.src !== window.location.origin + PLACEHOLDER_IMAGE_URL) {
+                            e.currentTarget.src = PLACEHOLDER_IMAGE_URL
                           }
                         }}
                       />
                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <img 
-                          src="/logo.png" 
-                          alt="Logo" 
+                        <img
+                          src="/logo.png"
+                          alt="Logo"
                           className="w-16 opacity-40"
                         />
                       </div>
@@ -283,4 +263,4 @@ export default function ConfirmedPage() {
       </div>
     </div>
   )
-} 
+}

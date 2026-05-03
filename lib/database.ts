@@ -889,3 +889,377 @@ export async function getProductionBatchOrders(batchId: string): Promise<Order[]
   }
 }
 
+// --- Order Links (controle de acesso ao modo pedido) ---
+
+export type OrderLinkStatus = "pending" | "confirmed"
+
+export type OrderLink = {
+  id: string
+  customer_name: string
+  order_number: string
+  quantity: number
+  message: string | null
+  message_template: string | null
+  generated_url: string
+  status: OrderLinkStatus
+  created_at: string
+  updated_at: string
+  confirmed_at: string | null
+  order_id: string | null
+}
+
+export type CreateOrderLink = {
+  customer_name: string
+  order_number: string
+  quantity: number
+  message: string | null
+  message_template: string | null
+  generated_url: string
+}
+
+export async function createOrderLink(input: CreateOrderLink): Promise<OrderLink> {
+  let client
+  try {
+    if (!input.customer_name?.trim()) {
+      throw new Error("Nome do cliente é obrigatório")
+    }
+    if (!input.order_number?.trim()) {
+      throw new Error("Número do pedido é obrigatório")
+    }
+    if (!Number.isInteger(input.quantity) || input.quantity <= 0) {
+      throw new Error("Quantidade inválida")
+    }
+    if (!input.generated_url?.trim()) {
+      throw new Error("URL gerada é obrigatória")
+    }
+
+    client = await pool.connect()
+
+    const existing = await client.query(
+      `SELECT id FROM order_links WHERE order_number = $1`,
+      [input.order_number.trim()]
+    )
+    if (existing.rows.length > 0) {
+      throw new Error("Já existe um link registrado para este número de pedido")
+    }
+
+    const result = await client.query(
+      `INSERT INTO order_links
+         (customer_name, order_number, quantity, message, message_template, generated_url)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [
+        input.customer_name.trim(),
+        input.order_number.trim(),
+        input.quantity,
+        input.message,
+        input.message_template,
+        input.generated_url,
+      ]
+    )
+    return result.rows[0] as OrderLink
+  } catch (error) {
+    console.error("Erro ao criar link de pedido:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function getOrderLinkByOrderNumber(orderNumber: string): Promise<OrderLink | null> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `SELECT * FROM order_links WHERE order_number = $1`,
+      [orderNumber]
+    )
+    if (result.rows.length === 0) return null
+    return result.rows[0] as OrderLink
+  } catch (error) {
+    console.error("Erro ao buscar link por número de pedido:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export type GetOrderLinksFilteredOptions = {
+  statuses?: OrderLinkStatus[]
+  periodFrom?: string
+  periodTo?: string
+  /** Campo de data: 'created' (created_at) ou 'confirmed' (confirmed_at). Default: 'created'. */
+  periodField?: "created" | "confirmed"
+  search?: string
+  page: number
+  pageSize: number
+}
+
+export type GetOrderLinksFilteredResult = {
+  links: OrderLink[]
+  total: number
+}
+
+export async function getOrderLinksFiltered(
+  options: GetOrderLinksFilteredOptions
+): Promise<GetOrderLinksFilteredResult> {
+  const { statuses, periodFrom, periodTo, periodField = "created", search, page, pageSize } = options
+  let client
+  try {
+    client = await pool.connect()
+
+    const conditions: string[] = []
+    const params: unknown[] = []
+    let paramIndex = 1
+
+    if (statuses && statuses.length > 0) {
+      conditions.push(`status = ANY($${paramIndex})`)
+      params.push(statuses)
+      paramIndex++
+    }
+
+    if (periodFrom || periodTo) {
+      const dateExpr = periodField === "confirmed" ? "confirmed_at" : "created_at"
+      if (periodField === "confirmed") {
+        conditions.push(`confirmed_at IS NOT NULL`)
+      }
+      if (periodFrom) {
+        conditions.push(`DATE(${dateExpr}) >= $${paramIndex}`)
+        params.push(periodFrom)
+        paramIndex++
+      }
+      if (periodTo) {
+        conditions.push(`DATE(${dateExpr}) <= $${paramIndex}`)
+        params.push(periodTo)
+        paramIndex++
+      }
+    }
+
+    if (search && search.trim()) {
+      conditions.push(`(customer_name ILIKE $${paramIndex} OR order_number ILIKE $${paramIndex})`)
+      params.push(`%${search.trim()}%`)
+      paramIndex++
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""
+
+    const countResult = await client.query(
+      `SELECT COUNT(*) FROM order_links ${whereClause}`,
+      params
+    )
+    const total = parseInt(countResult.rows[0].count, 10)
+
+    const offset = (page - 1) * pageSize
+    const limitParam = `$${paramIndex}`
+    const offsetParam = `$${paramIndex + 1}`
+    const queryParams = [...params, pageSize, offset]
+
+    const result = await client.query(
+      `SELECT * FROM order_links ${whereClause}
+       ORDER BY created_at DESC
+       LIMIT ${limitParam} OFFSET ${offsetParam}`,
+      queryParams
+    )
+    return { links: result.rows as OrderLink[], total }
+  } catch (error) {
+    console.error("Erro ao buscar links filtrados:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+// --- App Settings (key/value) ---
+
+export async function getAppSetting(key: string): Promise<string | null> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `SELECT value FROM app_settings WHERE key = $1`,
+      [key]
+    )
+    if (result.rows.length === 0) return null
+    return (result.rows[0].value as string | null) ?? null
+  } catch (error) {
+    console.error("Erro ao buscar configuração:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function upsertAppSetting(key: string, value: string): Promise<void> {
+  let client
+  try {
+    client = await pool.connect()
+    await client.query(
+      `INSERT INTO app_settings(key, value, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [key, value]
+    )
+  } catch (error) {
+    console.error("Erro ao salvar configuração:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+// --- Pedidos por nome de cliente (listagem pública) ---
+
+export type PublicOrderSummary = {
+  id: string
+  order: string
+  quantity_purchased: number
+  selected_images: string[]
+  created_at: string
+  customer_name: string
+}
+
+export async function getOrdersByCustomerName(name: string): Promise<PublicOrderSummary[]> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `SELECT id, "order", quantity_purchased, selected_images, created_at, customer_name
+         FROM orders
+        WHERE LOWER(customer_name) = LOWER($1)
+          AND canceled_at IS NULL
+        ORDER BY created_at DESC`,
+      [name]
+    )
+    return result.rows.map((row) => ({
+      id: row.id,
+      order: row.order,
+      quantity_purchased: row.quantity_purchased,
+      selected_images: row.selected_images,
+      created_at: row.created_at,
+      customer_name: row.customer_name,
+    }))
+  } catch (error) {
+    console.error("Erro ao buscar pedidos por cliente:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+// --- Criação de pedido em transação com confirmação do link ---
+
+export type CreateOrderResult = {
+  order: Order
+  link: OrderLink | null
+}
+
+/**
+ * Cria o pedido e marca o link como 'confirmed' na mesma transação,
+ * validando consistência entre customer_name/quantity informados e o link registrado.
+ *
+ * Comportamento de compatibilidade legacy:
+ *  - Se NÃO existir link registrado, ainda permite criar o pedido (mantém comportamento histórico).
+ *  - Se existir link 'pending': valida customer_name/quantity, atualiza para 'confirmed' e ata order_id.
+ *  - Se existir link 'confirmed': lança erro "Pedido já foi confirmado".
+ */
+export async function createOrderWithLinkConfirmation(order: CreateOrder): Promise<CreateOrderResult> {
+  let client
+  try {
+    if (!Number.isInteger(order.quantity_purchased) || order.quantity_purchased <= 0) {
+      throw new Error("Quantidade do pedido inválida")
+    }
+    if (
+      !Array.isArray(order.selected_images) ||
+      order.selected_images.some((item) => typeof item !== "string" || !item.trim())
+    ) {
+      throw new Error("Itens selecionados inválidos")
+    }
+    if (order.selected_images.length !== order.quantity_purchased) {
+      throw new Error("A quantidade de itens selecionados deve ser igual à quantidade do pedido")
+    }
+    if (!order.customer_name?.trim()) {
+      throw new Error("Nome do cliente é obrigatório")
+    }
+    if (!order.order?.trim()) {
+      throw new Error("Número do pedido é obrigatório")
+    }
+
+    client = await pool.connect()
+    await client.query("BEGIN")
+
+    const linkResult = await client.query(
+      `SELECT * FROM order_links WHERE order_number = $1 FOR UPDATE`,
+      [order.order]
+    )
+    const existingLink = (linkResult.rows[0] ?? null) as OrderLink | null
+
+    if (existingLink) {
+      if (existingLink.status === "confirmed") {
+        throw new Error("Este pedido já foi confirmado e não pode ser refeito")
+      }
+      if (existingLink.customer_name.trim().toLowerCase() !== order.customer_name.trim().toLowerCase()) {
+        throw new Error("Os dados do pedido não conferem com o link registrado")
+      }
+      if (existingLink.quantity !== order.quantity_purchased) {
+        throw new Error("A quantidade do pedido não confere com o link registrado")
+      }
+    }
+
+    // Verifica se já existe um pedido com o mesmo número (UNIQUE em orders.order)
+    const orderExists = await client.query(
+      'SELECT 1 FROM orders WHERE "order" = $1',
+      [order.order]
+    )
+    if (orderExists.rows.length > 0) {
+      throw new Error("Já existe um pedido com este número")
+    }
+
+    const insertResult = await client.query(
+      `INSERT INTO orders (customer_name, quantity_purchased, selected_images, whatsapp_message, "order")
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [
+        order.customer_name,
+        order.quantity_purchased,
+        JSON.stringify(order.selected_images),
+        order.whatsapp_message,
+        order.order,
+      ]
+    )
+    const createdOrder = {
+      ...insertResult.rows[0],
+      selected_images: insertResult.rows[0].selected_images,
+    } as Order
+
+    let updatedLink: OrderLink | null = null
+    if (existingLink) {
+      const updateResult = await client.query(
+        `UPDATE order_links
+            SET status = 'confirmed',
+                confirmed_at = NOW(),
+                updated_at = NOW(),
+                order_id = $2
+          WHERE id = $1
+        RETURNING *`,
+        [existingLink.id, createdOrder.id]
+      )
+      updatedLink = updateResult.rows[0] as OrderLink
+    }
+
+    await client.query("COMMIT")
+    return { order: createdOrder, link: updatedLink }
+  } catch (error) {
+    if (client) {
+      try {
+        await client.query("ROLLBACK")
+      } catch (rollbackError) {
+        console.error("Erro ao executar ROLLBACK:", rollbackError)
+      }
+    }
+    console.error("Erro ao criar pedido com confirmação de link:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
