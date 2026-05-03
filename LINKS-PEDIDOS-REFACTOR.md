@@ -34,12 +34,17 @@ flowchart TD
 
 ### Modos do cliente
 
+> **Importante:** o comportamento abaixo assume os defaults
+> (`catalog_access_restricted = true`, `auto_register_links_on_confirm = false`).
+> Veja "Configurações de acesso" para o efeito de cada flag.
+
 | URL acessada                                         | Resultado                                                                                                |
 | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `/catalog`                                           | Visualização (qualquer um).                                                                              |
 | `/?nome=X&pedido=Y&quantidade=Z` com link `pending`  | Redireciona para `/catalog` em modo pedido (carrinho do orderNumber `Y` é restaurado se existir).        |
 | `/?nome=X&pedido=Y&quantidade=Z` com link `confirmed`| Redireciona para `/confirmed/Y` (com banner "já confirmado").                                            |
-| `/?...` sem link e sem `orders.Y`                    | Tela "URL Inválida".                                                                                     |
+| `/?...` sem link e sem `orders.Y`                    | Tela "URL Inválida" (apenas quando `catalog_access_restricted = true`).                                  |
+| `/?...` sem link e sem `orders.Y` (restrição off)    | Redireciona para `/catalog` em modo pedido. Auto-registro pode rodar na confirmação.                     |
 | `/?...` sem link mas com `orders.Y` (legado)         | Redireciona graceful para `/confirmed/Y`.                                                                |
 | `/confirmed/Y`                                       | Detalhes do pedido (sempre acessível, sem precisar de link registrado).                                  |
 | `/orders/{username}`                                 | Lista pública dos pedidos confirmados do cliente.                                                        |
@@ -80,6 +85,22 @@ Seed inicial:
 key   = 'default_link_message'
 value = 'Olá! Aqui está o link para escolher os itens do seu pedido na nossa galeria: {{link gerado}}'
 ```
+
+#### Flags adicionais (sem migração obrigatória)
+
+As duas chaves abaixo são lidas do mesmo `app_settings`, mas **não** são
+seedadas: o servidor aplica defaults quando ausentes, garantindo que o
+comportamento atual seja preservado caso a chave ainda não exista.
+
+| Chave                              | Default | Significado                                                                            |
+| ---------------------------------- | ------- | -------------------------------------------------------------------------------------- |
+| `catalog_access_restricted`        | `true`  | Quando `true`, apenas links registrados podem entrar em modo pedido.                   |
+| `auto_register_links_on_confirm`   | `false` | Quando `true` **e** restrição estiver desligada, pedidos confirmados sem link prévio   |
+|                                    |         | criam automaticamente um `order_link` com status `confirmed` na mesma transação.       |
+
+Regra defensiva: o backend força `auto_register_links_on_confirm = false`
+quando `catalog_access_restricted = true` (a opção secundária só faz
+sentido com a restrição desligada).
 
 ### Como aplicar a migração
 
@@ -139,18 +160,26 @@ ON CONFLICT (key) DO NOTHING;
 
 | Método | Rota                                | Descrição                                                                                       |
 | ------ | ----------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `POST` | `/api/order-links`                  | Cria um link novo (valida quantity em `MEASURE_BY_QUANTITY`).                                   |
+| `POST` | `/api/order-links`                  | Cria um link novo (quantidade livre entre 1 e 999).                                             |
 | `GET`  | `/api/order-links`                  | Lista paginada com filtros (status, período `created`/`confirmed`, busca por nome/pedido).      |
 | `GET`  | `/api/settings/link-message`        | Lê o template padrão da mensagem.                                                               |
 | `PUT`  | `/api/settings/link-message`        | Atualiza o template padrão (até 5000 caracteres).                                               |
+| `GET`  | `/api/settings/access-control`      | Lê as flags `catalog_access_restricted` e `auto_register_links_on_confirm`.                     |
+| `PUT`  | `/api/settings/access-control`      | Atualiza ambas as flags (aceita body parcial). Aplica a regra defensiva `auto=false` quando     |
+|        |                                     | `restricted=true` antes de persistir.                                                           |
 
 Resposta típica de `POST /api/order-links/validate`:
 
 ```json
 { "result": "allowed" }
+{ "result": "allowed", "reason": "unrestricted" }
 { "result": "confirmed", "legacy": true }
 { "result": "invalid", "reason": "not_registered" }
 ```
+
+> `{ "result": "allowed", "reason": "unrestricted" }` só ocorre quando o
+> admin desligou `catalog_access_restricted`. Nesse caso, links não
+> registrados também passam para `/catalog` em modo pedido.
 
 ---
 
@@ -188,17 +217,30 @@ Resposta típica de `POST /api/order-links/validate`:
 
 - **`app/admin/layout.tsx`** — nova aba **"Links de Pedidos"** entre
   Dashboard e Histórico de produção (ícone `Link2`).
-- **`app/admin/links/page.tsx`** *(novo)* — três áreas:
-  1. **Mensagem padrão** com textarea, hint sobre o placeholder
-     `{{link gerado}}` e botão Salvar.
-  2. **Novo link**: Nome (username Shopee), Pedido, Quantidade
-     (Select limitado a `MEASURE_BY_QUANTITY`), campo "Link gerado"
+- **`app/admin/links/page.tsx`** *(novo)* — organizado em:
+  1. **Topo da aba**: título à esquerda; à direita, dois botões — **"Mensagem
+     padrão"** abre o modal homônimo e **engrenagem** (`Settings`) abre o
+     modal **"Configurações de acesso"**.
+  2. **Modal "Mensagem padrão"**: textarea com hint sobre o placeholder
+     `{{link gerado}}` + botões Cancelar/Salvar. Ao salvar com sucesso o
+     modal fecha automaticamente.
+  3. **Modal "Configurações de acesso"** *(novo)*:
+     - `Switch` principal: **"Restringir acesso ao catálogo (modo pedido)"**
+       liga/desliga `catalog_access_restricted`.
+     - `Switch` secundário, exibido apenas quando o principal está
+       desligado: **"Registrar links automaticamente ao confirmar pedido"**
+       controla `auto_register_links_on_confirm`. Quando o principal volta a
+       ser ligado, o secundário é forçado a `false` (UI + backend).
+  4. **Novo link**: Nome (username Shopee), Pedido, Quantidade
+     (`Input type="number"` aceitando 1–999), campo "Link gerado"
      (preenchido em tempo real e copiável), textarea "Mensagem"
-     (inicializa com o template, com pré-visualização) e botão **Registrar Link**.
-  3. **Modal de sucesso**: exibe URL e mensagem (com quebras de linha) e
+     (inicializa com o template, com pré-visualização) e botão
+     **Registrar Link**.
+  5. **Modal de sucesso**: exibe URL e mensagem (com quebras de linha) e
      oferece copiar link / copiar mensagem.
-  4. **Lista** paginada com filtros (status, período `created`/`confirmed`,
-     busca por nome/pedido) — mesmo padrão visual da tabela do Dashboard.
+  6. **Filtros** — `Status` em uma linha; `Período` (campo + duas datas +
+     ações) e **Busca** (input + ações) lado a lado em uma segunda linha.
+  7. **Lista** paginada — mesmo padrão visual da tabela do Dashboard.
 
 ---
 
@@ -211,11 +253,19 @@ Resposta típica de `POST /api/order-links/validate`:
   reutilizada pelas páginas `/confirmed/[orderNumber]` e
   `/orders/[username]`. Possui fallback para `/api/images?code=...` e
   placeholder único `PLACEHOLDER_IMAGE_URL`.
-- **`createOrderWithLinkConfirmation()`** em
+- **`createOrderWithLinkConfirmation(order, options?)`** em
   [`lib/database.ts`](lib/database.ts) — abre transação,
   trava o link com `FOR UPDATE`, valida `customer_name`/`quantity`, insere
   o pedido e atualiza o link para `confirmed` em uma única operação.
   Mantém compatibilidade com pedidos legados (sem link registrado).
+  Aceita `options.autoRegister = { generatedUrl }`: quando fornecido **e**
+  não existir link prévio, cria dentro da mesma transação um `order_link`
+  com status `confirmed`. O `INSERT` usa `ON CONFLICT (order_number) DO NOTHING`
+  para tratar corridas como no-op (o pedido é criado mesmo assim).
+- **`getAppSettingBoolean(key, defaultValue)`** em
+  [`lib/database.ts`](lib/database.ts) — lê uma chave booleana de
+  `app_settings`, com fallback robusto para o default quando ausente ou
+  inválida. Usado pelos endpoints de validação e criação de pedido.
 
 ---
 
@@ -230,6 +280,25 @@ Resposta típica de `POST /api/order-links/validate`:
 | `imageCache:{orderNumber}`             | Cache local de URLs de imagens vistas.                | Após confirmar pedido / troca de orderNumber.    |
 | `justConfirmed:{orderNumber}`          | Flag `"1"` que suprime o banner "já confirmado" na    | É consumida (removida) na primeira visita        |
 |                                        | primeira visita ao `/confirmed/{orderNumber}`.        | ao `/confirmed/{orderNumber}`.                   |
+
+---
+
+## Configurações de acesso
+
+A aba `/admin/links` expõe dois switches no modal **Configurações de
+acesso**, persistidos em `app_settings` via `PUT /api/settings/access-control`.
+
+| Cenário                                                       | `restricted` | `auto_register` | Comportamento                                                                                                             |
+| ------------------------------------------------------------- | ------------ | --------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Default (estado atual antes da feature)                       | `true`       | `false`         | Apenas links registrados acessam modo pedido. URLs não registradas mostram "URL Inválida".                                |
+| Restrição desligada, sem auto-registro                        | `false`      | `false`         | Qualquer URL com `nome/pedido/quantidade` válida vai para `/catalog`. Pedido criado, mas `order_links` NÃO recebe entrada.|
+| Restrição desligada, com auto-registro                        | `false`      | `true`          | Igual ao anterior + ao confirmar o pedido, o link é registrado automaticamente como `confirmed` (UNIQUE protege corrida). |
+| Tentativa de ligar restrição com auto-registro ativo          | `true`       | (forçado para `false`) | O backend coage `auto_register=false` no PUT (UI replica a coerção).                                              |
+
+Em todos os cenários, links já registrados como `pending` continuam
+sendo validados normalmente: mismatch de nome/quantidade ainda retorna
+`{ result: 'invalid', reason: 'mismatch' }` para preservar a integridade
+dos links efetivamente registrados.
 
 ---
 
@@ -274,10 +343,34 @@ Resposta típica de `POST /api/order-links/validate`:
    com banner destacado.
 6. Cliente clica "Ver todos os meus pedidos" → vê listagem em
    `/orders/{username}` com modal "Ver itens".
-7. Cliente abre URL com `pedido=NAOEXISTE` → tela "URL Inválida".
+7. Cliente abre URL com `pedido=NAOEXISTE` → tela "URL Inválida"
+   (defaults: restrição ligada).
 8. Pedido legado: URL com params para um `pedido` antigo → redirect
    graceful para `/confirmed/{orderNumber}`.
 9. Admin tenta registrar link com `pedido` já existente → erro amigável.
 10. Tentativa de bypass: forçar `customerData` no localStorage e abrir
     `/catalog` → validação em background redireciona; se passar, o servidor
     rejeita o `POST /api/orders`.
+
+### Cenários adicionais para "Configurações de acesso"
+
+11. Admin desliga **"Restringir acesso ao catálogo"** → switch secundário
+    aparece. Cliente abre `/?nome=X&pedido=Y&quantidade=Z` sem link prévio
+    → vai para `/catalog` em modo pedido normalmente.
+12. Mesma situação do 11 + admin liga **"Registrar links automaticamente"**
+    → cliente confirma o pedido → tabela em `/admin/links` passa a exibir
+    o link como `confirmed` (criado pela transação).
+13. Cenário 11 sem o auto-registro → cliente confirma, pedido é criado,
+    mas a tabela de links continua vazia (modo legacy preservado).
+14. Admin liga novamente "Restrição" enquanto o auto-registro estava ativo
+    → backend força `auto_register_links_on_confirm=false`. `GET
+    /api/settings/access-control` confirma o novo estado.
+15. Link `pending` registrado + restrição desligada → cliente tenta
+    burlar com `nome` ou `quantidade` diferentes do registrado → resposta
+    `{ result: 'invalid', reason: 'mismatch' }` (proteção mantida).
+16. Concorrência: dois browsers confirmam o mesmo `order_number` em
+    paralelo (com auto-registro ligado) → apenas um pedido é criado
+    (UNIQUE em `orders.order`); o outro recebe erro amigável; nenhum link
+    duplicado é gerado.
+17. Layout: `/admin/links` mostra `Status` na linha 1 e `Período` + `Busca`
+    lado a lado na linha 2 (em telas estreitas, empilham verticalmente).

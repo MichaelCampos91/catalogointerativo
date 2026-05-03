@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
-import { createOrderWithLinkConfirmation, getOrders, updateOrderStatus, getOrdersByOrderNumber, markOrdersInProduction, finalizeOrders, getOrderById, getOrdersByIds, cancelOrder, getOrdersFiltered, getOrderIdsFiltered, createProductionBatch } from "@/lib/database"
+import { createOrderWithLinkConfirmation, getOrders, updateOrderStatus, getOrdersByOrderNumber, markOrdersInProduction, finalizeOrders, getOrderById, getOrdersByIds, cancelOrder, getOrdersFiltered, getOrderIdsFiltered, createProductionBatch, getAppSettingBoolean } from "@/lib/database"
 import type { OrderStatusFilter } from "@/lib/database"
 import { normalizePeriodField } from "@/lib/database"
 import { requireAuth, authErrorResponse } from "@/lib/auth"
+import { buildClientOrderLink } from "@/lib/order-links"
 
 function validateCreateOrderPayload(body: unknown): { valid: true } | { valid: false; message: string } {
   if (!body || typeof body !== "object") {
@@ -37,7 +38,30 @@ export async function POST(request: Request) {
     if (!validation.valid) {
       return NextResponse.json({ error: validation.message }, { status: 400 })
     }
-    const { order } = await createOrderWithLinkConfirmation(body)
+
+    // Defesa em profundidade: só auto-registra se a restrição estiver desligada
+    // E o admin tiver explicitamente habilitado o auto-registro.
+    const [restricted, autoRegisterFlag] = await Promise.all([
+      getAppSettingBoolean("catalog_access_restricted", true),
+      getAppSettingBoolean("auto_register_links_on_confirm", false),
+    ])
+    const shouldAutoRegister = !restricted && autoRegisterFlag
+
+    let autoRegisterOption: { generatedUrl: string } | null = null
+    if (shouldAutoRegister) {
+      const origin = request.headers.get("origin") ?? undefined
+      const generatedUrl = buildClientOrderLink({
+        name: body.customer_name,
+        orderNumber: body.order,
+        quantity: body.quantity_purchased,
+        origin,
+      })
+      autoRegisterOption = { generatedUrl }
+    }
+
+    const { order } = await createOrderWithLinkConfirmation(body, {
+      autoRegister: autoRegisterOption,
+    })
     console.log("API: Pedido criado com sucesso")
     return NextResponse.json(order)
   } catch (error) {

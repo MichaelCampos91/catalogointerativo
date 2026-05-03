@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server"
-import { getOrderLinkByOrderNumber, checkOrderExists } from "@/lib/database"
+import {
+  getOrderLinkByOrderNumber,
+  checkOrderExists,
+  getAppSettingBoolean,
+} from "@/lib/database"
 
 /**
  * Endpoint público que valida o trio (nome, pedido, quantidade) recebido pela
@@ -44,6 +48,14 @@ export async function POST(request: Request) {
     const legacyExists = await checkOrderExists(orderNumber)
     if (legacyExists) {
       return NextResponse.json({ result: "confirmed", legacy: true }, { status: 200 })
+    }
+
+    // Quando a restrição de acesso ao catálogo está desligada, links não
+    // registrados podem entrar em modo pedido normalmente. O auto-registro
+    // (se ativo) é feito apenas no momento da confirmação do pedido.
+    const restricted = await getAppSettingBoolean("catalog_access_restricted", true)
+    if (!restricted) {
+      return NextResponse.json({ result: "allowed", reason: "unrestricted" }, { status: 200 })
     }
 
     return NextResponse.json({ result: "invalid", reason: "not_registered" }, { status: 200 })

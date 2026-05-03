@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Switch } from "@/components/ui/switch"
 import {
   Select,
   SelectContent,
@@ -38,7 +39,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { Copy, Link2, Search, CheckCircle2, Save } from "lucide-react"
+import { Copy, Link2, Search, CheckCircle2, Save, MessageSquare, Settings } from "lucide-react"
 import { useToast } from "@/hooks/use-sonner-toast"
 
 type OrderLink = {
@@ -106,6 +107,26 @@ export default function AdminLinksPage() {
   const [successOpen, setSuccessOpen] = useState(false)
   const [createdLink, setCreatedLink] = useState<OrderLink | null>(null)
 
+  // Modais do topo
+  const [messageModalOpen, setMessageModalOpen] = useState(false)
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false)
+
+  // Configurações de acesso
+  type AccessSettings = {
+    catalog_access_restricted: boolean
+    auto_register_links_on_confirm: boolean
+  }
+  const [accessSettings, setAccessSettings] = useState<AccessSettings>({
+    catalog_access_restricted: true,
+    auto_register_links_on_confirm: false,
+  })
+  const [accessSettingsDraft, setAccessSettingsDraft] = useState<AccessSettings>({
+    catalog_access_restricted: true,
+    auto_register_links_on_confirm: false,
+  })
+  const [accessSettingsLoading, setAccessSettingsLoading] = useState(true)
+  const [savingAccessSettings, setSavingAccessSettings] = useState(false)
+
   // Filters / list
   const [statusFilters, setStatusFilters] = useState<Record<"pending" | "confirmed", boolean>>({
     pending: true,
@@ -146,6 +167,39 @@ export default function AdminLinksPage() {
       cancelled = true
     }
   }, [])
+
+  // Carregar configurações de acesso na entrada da página
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch("/api/settings/access-control", { credentials: "include" })
+        if (!res.ok) throw new Error("Falha ao carregar configurações de acesso")
+        const data = (await res.json()) as AccessSettings
+        if (cancelled) return
+        const normalized: AccessSettings = {
+          catalog_access_restricted: !!data.catalog_access_restricted,
+          auto_register_links_on_confirm: !!data.auto_register_links_on_confirm,
+        }
+        setAccessSettings(normalized)
+        setAccessSettingsDraft(normalized)
+      } catch (err) {
+        console.error(err)
+      } finally {
+        if (!cancelled) setAccessSettingsLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Sincroniza o draft com o estado salvo sempre que o modal de configurações abrir.
+  useEffect(() => {
+    if (settingsModalOpen) {
+      setAccessSettingsDraft(accessSettings)
+    }
+  }, [settingsModalOpen, accessSettings])
 
   const loadLinks = async (pageNum = page) => {
     try {
@@ -232,6 +286,7 @@ export default function AdminLinksPage() {
         throw new Error(err.message || err.error || "Falha ao salvar template")
       }
       toast.success({ title: "Template salvo", description: "O template padrão foi atualizado." })
+      setMessageModalOpen(false)
     } catch (err) {
       toast.error({
         title: "Erro ao salvar template",
@@ -239,6 +294,48 @@ export default function AdminLinksPage() {
       })
     } finally {
       setSavingTemplate(false)
+    }
+  }
+
+  const handleSaveAccessSettings = async () => {
+    try {
+      setSavingAccessSettings(true)
+      // Coerência local antes de enviar (o backend também aplica essa regra).
+      const payload: AccessSettings = {
+        catalog_access_restricted: accessSettingsDraft.catalog_access_restricted,
+        auto_register_links_on_confirm: accessSettingsDraft.catalog_access_restricted
+          ? false
+          : accessSettingsDraft.auto_register_links_on_confirm,
+      }
+      const res = await fetch("/api/settings/access-control", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.message || err.error || "Falha ao salvar configurações")
+      }
+      const saved = (await res.json()) as AccessSettings
+      const normalized: AccessSettings = {
+        catalog_access_restricted: !!saved.catalog_access_restricted,
+        auto_register_links_on_confirm: !!saved.auto_register_links_on_confirm,
+      }
+      setAccessSettings(normalized)
+      setAccessSettingsDraft(normalized)
+      toast.success({
+        title: "Configurações salvas",
+        description: "As preferências de acesso foram atualizadas.",
+      })
+      setSettingsModalOpen(false)
+    } catch (err) {
+      toast.error({
+        title: "Erro ao salvar configurações",
+        description: err instanceof Error ? err.message : "Erro desconhecido",
+      })
+    } finally {
+      setSavingAccessSettings(false)
     }
   }
 
@@ -287,36 +384,27 @@ export default function AdminLinksPage() {
 
   return (
     <div className="max-w-6xl mx-auto w-full space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Links de Pedidos</h1>
-        <p className="text-gray-600">Gere e gerencie os links que liberam o cliente a fazer um pedido no catálogo.</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Links de Pedidos</h1>
+          <p className="text-gray-600">Gere e gerencie os links que liberam o cliente a fazer um pedido no catálogo.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setMessageModalOpen(true)}>
+            <MessageSquare className="w-4 h-4 mr-2" />
+            Mensagem padrão
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setSettingsModalOpen(true)}
+            aria-label="Configurações de acesso"
+            title="Configurações de acesso"
+          >
+            <Settings className="w-4 h-4" />
+          </Button>
+        </div>
       </div>
-
-      {/* Mensagem padrão */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Mensagem padrão</CardTitle>
-          <CardDescription>
-            Esse texto será pré-preenchido ao criar um novo link. Use o marcador{" "}
-            <code className="bg-gray-100 px-1 rounded">{PLACEHOLDER_TOKEN}</code> onde o link deve aparecer.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Textarea
-            value={defaultTemplate}
-            onChange={(e) => setDefaultTemplate(e.target.value)}
-            disabled={defaultTemplateLoading}
-            rows={4}
-            placeholder={`Ex.: Olá! Aqui está o link do seu pedido: ${PLACEHOLDER_TOKEN}`}
-          />
-          <div className="flex justify-end">
-            <Button onClick={handleSaveDefaultTemplate} disabled={defaultTemplateLoading || savingTemplate}>
-              <Save className="w-4 h-4 mr-2" />
-              {savingTemplate ? "Salvando..." : "Salvar template"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Novo link */}
       <Card>
@@ -409,28 +497,30 @@ export default function AdminLinksPage() {
       {/* Filtros */}
       <Card>
         <CardContent className="p-4 space-y-4">
-          {/* Linha 1: Status + Período */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <p className="text-xs text-gray-500 mb-2">Status</p>
-              <div className="flex flex-wrap gap-3">
-                {STATUS_OPTIONS.map(({ key, label }) => (
-                  <label key={key} className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
-                      checked={statusFilters[key]}
-                      onCheckedChange={(checked) => {
-                        const next = { ...statusFilters, [key]: !!checked }
-                        // Garante pelo menos um selecionado
-                        if (!next.pending && !next.confirmed) return
-                        setStatusFilters(next)
-                        setPage(1)
-                      }}
-                    />
-                    <span className="text-sm">{label}</span>
-                  </label>
-                ))}
-              </div>
+          {/* Linha 1: Status */}
+          <div>
+            <p className="text-xs text-gray-500 mb-2">Status</p>
+            <div className="flex flex-wrap gap-3">
+              {STATUS_OPTIONS.map(({ key, label }) => (
+                <label key={key} className="flex items-center gap-2 cursor-pointer">
+                  <Checkbox
+                    checked={statusFilters[key]}
+                    onCheckedChange={(checked) => {
+                      const next = { ...statusFilters, [key]: !!checked }
+                      // Garante pelo menos um selecionado
+                      if (!next.pending && !next.confirmed) return
+                      setStatusFilters(next)
+                      setPage(1)
+                    }}
+                  />
+                  <span className="text-sm">{label}</span>
+                </label>
+              ))}
             </div>
+          </div>
+
+          {/* Linha 2: Período + Busca lado a lado */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <p className="text-xs text-gray-500 mb-2">Período</p>
               <div className="flex flex-wrap items-center gap-2">
@@ -493,49 +583,48 @@ export default function AdminLinksPage() {
                 </Button>
               </div>
             </div>
-          </div>
 
-          {/* Linha 2: Busca */}
-          <div>
-            <p className="text-xs text-gray-500 mb-2">Buscar por nome ou número do pedido</p>
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <Input
-                  type="text"
-                  placeholder="Digite e pressione Enter..."
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
+            <div>
+              <p className="text-xs text-gray-500 mb-2">Buscar por nome ou número do pedido</p>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                  <Input
+                    type="text"
+                    placeholder="Digite e pressione Enter..."
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        setSearchQuery(searchInput)
+                        setPage(1)
+                      }
+                    }}
+                    className="pl-9"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => {
                       setSearchQuery(searchInput)
                       setPage(1)
-                    }
-                  }}
-                  className="pl-9"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setSearchQuery(searchInput)
-                    setPage(1)
-                  }}
-                >
-                  Buscar
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setSearchInput("")
-                    setSearchQuery("")
-                    setPage(1)
-                  }}
-                >
-                  Limpar
-                </Button>
+                    }}
+                  >
+                    Buscar
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSearchInput("")
+                      setSearchQuery("")
+                      setPage(1)
+                    }}
+                  >
+                    Limpar
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
@@ -735,6 +824,115 @@ export default function AdminLinksPage() {
           )}
           <DialogFooter>
             <Button onClick={() => setSuccessOpen(false)}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Mensagem padrão */}
+      <Dialog open={messageModalOpen} onOpenChange={setMessageModalOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Mensagem padrão</DialogTitle>
+            <DialogDescription>
+              Esse texto será pré-preenchido ao criar um novo link. Use o marcador{" "}
+              <code className="bg-gray-100 px-1 rounded">{PLACEHOLDER_TOKEN}</code> onde o link deve aparecer.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Textarea
+              value={defaultTemplate}
+              onChange={(e) => setDefaultTemplate(e.target.value)}
+              disabled={defaultTemplateLoading}
+              rows={6}
+              placeholder={`Ex.: Olá! Aqui está o link do seu pedido: ${PLACEHOLDER_TOKEN}`}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMessageModalOpen(false)} disabled={savingTemplate}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveDefaultTemplate} disabled={defaultTemplateLoading || savingTemplate}>
+              <Save className="w-4 h-4 mr-2" />
+              {savingTemplate ? "Salvando..." : "Salvar template"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Configurações de acesso */}
+      <Dialog open={settingsModalOpen} onOpenChange={setSettingsModalOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Configurações de acesso</DialogTitle>
+            <DialogDescription>
+              Controle como o catálogo trata links não registrados.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-5 py-2">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <p className="text-sm font-medium text-gray-900">
+                  Restringir acesso ao catálogo (modo pedido)
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Quando ativado, apenas links registrados nesta aba podem entrar em modo pedido.
+                  URLs não registradas exibem a tela de "URL Inválida".
+                </p>
+              </div>
+              <Switch
+                checked={accessSettingsDraft.catalog_access_restricted}
+                disabled={accessSettingsLoading || savingAccessSettings}
+                onCheckedChange={(checked) => {
+                  setAccessSettingsDraft((prev) => ({
+                    catalog_access_restricted: checked,
+                    // Coerência: se restrição liga, auto-registro perde o sentido.
+                    auto_register_links_on_confirm: checked
+                      ? false
+                      : prev.auto_register_links_on_confirm,
+                  }))
+                }}
+              />
+            </div>
+
+            {!accessSettingsDraft.catalog_access_restricted && (
+              <div className="flex items-start justify-between gap-4 border-t pt-4">
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-gray-900">
+                    Registrar links automaticamente ao confirmar pedido
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Quando ativado, pedidos confirmados a partir de URLs sem link prévio
+                    geram automaticamente um registro de link com status "Confirmado".
+                  </p>
+                </div>
+                <Switch
+                  checked={accessSettingsDraft.auto_register_links_on_confirm}
+                  disabled={accessSettingsLoading || savingAccessSettings}
+                  onCheckedChange={(checked) => {
+                    setAccessSettingsDraft((prev) => ({
+                      ...prev,
+                      auto_register_links_on_confirm: checked,
+                    }))
+                  }}
+                />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setSettingsModalOpen(false)}
+              disabled={savingAccessSettings}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSaveAccessSettings}
+              disabled={accessSettingsLoading || savingAccessSettings}
+            >
+              <Save className="w-4 h-4 mr-2" />
+              {savingAccessSettings ? "Salvando..." : "Salvar configurações"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1107,6 +1107,28 @@ export async function upsertAppSetting(key: string, value: string): Promise<void
   }
 }
 
+/**
+ * Lê uma configuração booleana de `app_settings`. Quando a chave não existe ou
+ * o valor é nulo/inválido, devolve `defaultValue`. Útil para flags cujo valor
+ * padrão precisa ser preservado mesmo sem migração explícita.
+ */
+export async function getAppSettingBoolean(
+  key: string,
+  defaultValue: boolean
+): Promise<boolean> {
+  try {
+    const value = await getAppSetting(key)
+    if (value === null || value === undefined) return defaultValue
+    const normalized = value.trim().toLowerCase()
+    if (normalized === "true") return true
+    if (normalized === "false") return false
+    return defaultValue
+  } catch (error) {
+    console.error(`Erro ao ler configuração booleana '${key}':`, error)
+    return defaultValue
+  }
+}
+
 // --- Pedidos por nome de cliente (listagem pública) ---
 
 export type PublicOrderSummary = {
@@ -1161,8 +1183,16 @@ export type CreateOrderResult = {
  *  - Se NÃO existir link registrado, ainda permite criar o pedido (mantém comportamento histórico).
  *  - Se existir link 'pending': valida customer_name/quantity, atualiza para 'confirmed' e ata order_id.
  *  - Se existir link 'confirmed': lança erro "Pedido já foi confirmado".
+ *
+ * Quando `options.autoRegister` é fornecido e NÃO existe link prévio, registra
+ * automaticamente um `order_links` com status `confirmed` dentro da mesma
+ * transação. Em caso de race (UNIQUE em order_number), o INSERT é no-op e o
+ * pedido é criado normalmente sem link associado.
  */
-export async function createOrderWithLinkConfirmation(order: CreateOrder): Promise<CreateOrderResult> {
+export async function createOrderWithLinkConfirmation(
+  order: CreateOrder,
+  options?: { autoRegister?: { generatedUrl: string } | null }
+): Promise<CreateOrderResult> {
   let client
   try {
     if (!Number.isInteger(order.quantity_purchased) || order.quantity_purchased <= 0) {
@@ -1244,6 +1274,26 @@ export async function createOrderWithLinkConfirmation(order: CreateOrder): Promi
         [existingLink.id, createdOrder.id]
       )
       updatedLink = updateResult.rows[0] as OrderLink
+    } else if (options?.autoRegister) {
+      // Auto-registro: cria order_link já confirmado para pedidos vindos de
+      // links não cadastrados quando o admin habilitou esse modo.
+      // ON CONFLICT DO NOTHING evita duplicidade em condições de corrida.
+      const autoRegisterResult = await client.query(
+        `INSERT INTO order_links
+           (customer_name, order_number, quantity, message, message_template,
+            generated_url, status, confirmed_at, order_id)
+         VALUES ($1, $2, $3, NULL, NULL, $4, 'confirmed', NOW(), $5)
+         ON CONFLICT (order_number) DO NOTHING
+         RETURNING *`,
+        [
+          order.customer_name,
+          order.order,
+          order.quantity_purchased,
+          options.autoRegister.generatedUrl,
+          createdOrder.id,
+        ]
+      )
+      updatedLink = (autoRegisterResult.rows[0] ?? null) as OrderLink | null
     }
 
     await client.query("COMMIT")
