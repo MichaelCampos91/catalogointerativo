@@ -7,7 +7,6 @@ import {
   type OrderLinkStatus,
 } from "@/lib/database"
 import { requireAuth, authErrorResponse } from "@/lib/auth"
-import { MEASURE_BY_QUANTITY } from "@/app/admin/measurements"
 import { buildClientOrderLink } from "@/lib/order-links"
 
 const VALID_STATUSES: OrderLinkStatus[] = ["pending", "confirmed"]
@@ -39,14 +38,8 @@ export async function POST(request: Request) {
     if (!orderNumber) {
       return NextResponse.json({ error: "Número do pedido é obrigatório" }, { status: 400 })
     }
-    if (!Number.isInteger(quantity) || quantity <= 0) {
+    if (!Number.isInteger(quantity) || quantity <= 0 || quantity > 999) {
       return NextResponse.json({ error: "Quantidade inválida" }, { status: 400 })
-    }
-    if (!(quantity in MEASURE_BY_QUANTITY)) {
-      return NextResponse.json(
-        { error: "Quantidade não suportada pelo catálogo" },
-        { status: 400 },
-      )
     }
 
     const generatedUrl = buildClientOrderLink({

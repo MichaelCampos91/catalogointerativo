@@ -40,7 +40,6 @@ import {
 } from "@/components/ui/dialog"
 import { Copy, Link2, Search, CheckCircle2, Save } from "lucide-react"
 import { useToast } from "@/hooks/use-sonner-toast"
-import { MEASURE_BY_QUANTITY } from "@/app/admin/measurements"
 
 type OrderLink = {
   id: string
@@ -206,7 +205,7 @@ export default function AdminLinksPage() {
       orderNumber.trim() !== "" &&
       Number.isInteger(qtyNumber) &&
       qtyNumber > 0 &&
-      qtyNumber in MEASURE_BY_QUANTITY
+      qtyNumber <= 999
     )
   }, [customerName, orderNumber, quantity])
 
@@ -347,21 +346,22 @@ export default function AdminLinksPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="quantity">Quantidade de itens</Label>
-              <Select value={quantity} onValueChange={setQuantity}>
-                <SelectTrigger id="quantity">
-                  <SelectValue placeholder="Selecione" />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.keys(MEASURE_BY_QUANTITY)
-                    .map((k) => Number(k))
-                    .sort((a, b) => a - b)
-                    .map((n) => (
-                      <SelectItem key={n} value={String(n)}>
-                        {n} {n === 1 ? "produto" : "produtos"}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+              <Input
+                id="quantity"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={999}
+                step={1}
+                maxLength={3}
+                value={quantity}
+                onChange={(e) => {
+                  // Limita a 3 caracteres numéricos
+                  const onlyDigits = e.target.value.replace(/\D/g, "").slice(0, 3)
+                  setQuantity(onlyDigits)
+                }}
+                placeholder="Ex.: 10"
+              />
             </div>
           </div>
 
@@ -408,93 +408,98 @@ export default function AdminLinksPage() {
 
       {/* Filtros */}
       <Card>
-        <CardContent className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <p className="text-xs text-gray-500 mb-2">Status</p>
-            <div className="flex flex-wrap gap-3">
-              {STATUS_OPTIONS.map(({ key, label }) => (
-                <label key={key} className="flex items-center gap-2 cursor-pointer">
-                  <Checkbox
-                    checked={statusFilters[key]}
-                    onCheckedChange={(checked) => {
-                      const next = { ...statusFilters, [key]: !!checked }
-                      // Garante pelo menos um selecionado
-                      if (!next.pending && !next.confirmed) return
-                      setStatusFilters(next)
-                      setPage(1)
-                    }}
-                  />
-                  <span className="text-sm">{label}</span>
-                </label>
-              ))}
+        <CardContent className="p-4 space-y-4">
+          {/* Linha 1: Status + Período */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs text-gray-500 mb-2">Status</p>
+              <div className="flex flex-wrap gap-3">
+                {STATUS_OPTIONS.map(({ key, label }) => (
+                  <label key={key} className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={statusFilters[key]}
+                      onCheckedChange={(checked) => {
+                        const next = { ...statusFilters, [key]: !!checked }
+                        // Garante pelo menos um selecionado
+                        if (!next.pending && !next.confirmed) return
+                        setStatusFilters(next)
+                        setPage(1)
+                      }}
+                    />
+                    <span className="text-sm">{label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 mb-2">Período</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Select value={periodFieldDraft} onValueChange={(v) => setPeriodFieldDraft(v as "created" | "confirmed")}>
+                  <SelectTrigger className="w-[140px] h-9">
+                    <SelectValue placeholder="Campo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="created">Criado</SelectItem>
+                    <SelectItem value="confirmed">Confirmado</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input
+                  type="date"
+                  value={periodFromDraft}
+                  onChange={(e) => setPeriodFromDraft(e.target.value)}
+                  className="w-[140px]"
+                />
+                <span className="text-gray-500">até</span>
+                <Input
+                  type="date"
+                  value={periodToDraft}
+                  onChange={(e) => setPeriodToDraft(e.target.value)}
+                  className="w-[140px]"
+                />
+              </div>
+              <div className="flex gap-2 mt-2">
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    if ((periodFromDraft || periodToDraft) && (!periodFromDraft || !periodToDraft)) {
+                      toast.warning({
+                        title: "Período incompleto",
+                        description: "Preencha as duas datas para filtrar.",
+                      })
+                      return
+                    }
+                    setPeriodFromApplied(periodFromDraft)
+                    setPeriodToApplied(periodToDraft)
+                    setPeriodFieldApplied(periodFieldDraft)
+                    setPage(1)
+                  }}
+                >
+                  Filtrar
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setPeriodFromDraft("")
+                    setPeriodToDraft("")
+                    setPeriodFieldDraft("created")
+                    setPeriodFromApplied("")
+                    setPeriodToApplied("")
+                    setPeriodFieldApplied("created")
+                    setPage(1)
+                  }}
+                >
+                  Limpar
+                </Button>
+              </div>
             </div>
           </div>
-          <div>
-            <p className="text-xs text-gray-500 mb-2">Período</p>
-            <div className="flex flex-wrap items-center gap-2">
-              <Select value={periodFieldDraft} onValueChange={(v) => setPeriodFieldDraft(v as "created" | "confirmed")}>
-                <SelectTrigger className="w-[140px] h-9">
-                  <SelectValue placeholder="Campo" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="created">Criado</SelectItem>
-                  <SelectItem value="confirmed">Confirmado</SelectItem>
-                </SelectContent>
-              </Select>
-              <Input
-                type="date"
-                value={periodFromDraft}
-                onChange={(e) => setPeriodFromDraft(e.target.value)}
-                className="w-[140px]"
-              />
-              <span className="text-gray-500">até</span>
-              <Input
-                type="date"
-                value={periodToDraft}
-                onChange={(e) => setPeriodToDraft(e.target.value)}
-                className="w-[140px]"
-              />
-            </div>
-            <div className="flex gap-2 mt-2">
-              <Button
-                size="sm"
-                onClick={() => {
-                  if ((periodFromDraft || periodToDraft) && (!periodFromDraft || !periodToDraft)) {
-                    toast.warning({
-                      title: "Período incompleto",
-                      description: "Preencha as duas datas para filtrar.",
-                    })
-                    return
-                  }
-                  setPeriodFromApplied(periodFromDraft)
-                  setPeriodToApplied(periodToDraft)
-                  setPeriodFieldApplied(periodFieldDraft)
-                  setPage(1)
-                }}
-              >
-                Filtrar
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setPeriodFromDraft("")
-                  setPeriodToDraft("")
-                  setPeriodFieldDraft("created")
-                  setPeriodFromApplied("")
-                  setPeriodToApplied("")
-                  setPeriodFieldApplied("created")
-                  setPage(1)
-                }}
-              >
-                Limpar
-              </Button>
-            </div>
-          </div>
+
+          {/* Linha 2: Busca */}
           <div>
             <p className="text-xs text-gray-500 mb-2">Buscar por nome ou número do pedido</p>
-            <div className="flex flex-col gap-2">
-              <div className="relative">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
                 <Input
                   type="text"
