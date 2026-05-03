@@ -68,7 +68,7 @@ export async function POST(request: Request) {
     console.error("API: Erro ao criar pedido:", error)
     const message = error instanceof Error ? error.message : "Erro desconhecido"
     // Erros de regra de negócio retornam 400 para o cliente exibir mensagem amigável
-    const isClientError = /já foi confirmado|já existe|não confere|inválid|obrigatóri/i.test(message)
+    const isClientError = /já foi confirmado|já existe|não confere|inválid|obrigatóri|cancelado/i.test(message)
     return NextResponse.json(
       {
         error: isClientError ? message : "Erro interno do servidor",

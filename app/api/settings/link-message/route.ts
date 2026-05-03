@@ -5,7 +5,7 @@ import { requireAuth, authErrorResponse } from "@/lib/auth"
 
 const SETTING_KEY = "default_link_message"
 const FALLBACK_TEMPLATE =
-  "Olá! Aqui está o link para escolher os itens do seu pedido na nossa galeria: {{link gerado}}"
+  "Olá! Aqui está o link para escolher os itens do seu pedido na nossa galeria: {{link}}"
 
 export async function GET(request: Request) {
   try {

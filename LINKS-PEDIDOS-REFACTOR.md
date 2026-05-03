@@ -43,6 +43,7 @@ flowchart TD
 | `/catalog`                                           | Visualização (qualquer um).                                                                              |
 | `/?nome=X&pedido=Y&quantidade=Z` com link `pending`  | Redireciona para `/catalog` em modo pedido (carrinho do orderNumber `Y` é restaurado se existir).        |
 | `/?nome=X&pedido=Y&quantidade=Z` com link `confirmed`| Redireciona para `/confirmed/Y` (com banner "já confirmado").                                            |
+| `/?nome=X&pedido=Y&quantidade=Z` com link `cancelled`| Tela "URL Inválida" (`reason: 'cancelled'`). O link não pode mais ser reutilizado.                       |
 | `/?...` sem link e sem `orders.Y`                    | Tela "URL Inválida" (apenas quando `catalog_access_restricted = true`).                                  |
 | `/?...` sem link e sem `orders.Y` (restrição off)    | Redireciona para `/catalog` em modo pedido. Auto-registro pode rodar na confirmação.                     |
 | `/?...` sem link mas com `orders.Y` (legado)         | Redireciona graceful para `/confirmed/Y`.                                                                |
@@ -64,7 +65,7 @@ flowchart TD
 | `message`          | `TEXT`                        | Mensagem final, com `{{link gerado}}` substituído.       |
 | `message_template` | `TEXT`                        | Template original (com placeholder).                     |
 | `generated_url`    | `TEXT NOT NULL`               | URL pronta para enviar ao cliente.                       |
-| `status`           | `TEXT NOT NULL DEFAULT 'pending'` | `'pending' \| 'confirmed'`                            |
+| `status`           | `TEXT NOT NULL DEFAULT 'pending'` | `'pending' \| 'confirmed' \| 'cancelled'`             |
 | `created_at`       | `TIMESTAMPTZ DEFAULT NOW()`   |                                                          |
 | `updated_at`       | `TIMESTAMPTZ DEFAULT NOW()`   |                                                          |
 | `confirmed_at`     | `TIMESTAMPTZ`                 | Preenchido quando o pedido é criado.                     |
@@ -83,8 +84,13 @@ flowchart TD
 Seed inicial:
 ```
 key   = 'default_link_message'
-value = 'Olá! Aqui está o link para escolher os itens do seu pedido na nossa galeria: {{link gerado}}'
+value = 'Olá! Aqui está o link para escolher os itens do seu pedido na nossa galeria: {{link}}'
 ```
+
+> **Marcador da mensagem:** o token oficial é `{{link}}`. O legado
+> `{{link gerado}}` continua sendo aceito pelo backend e pela
+> pré-visualização da UI (regex `/{{\\s*link(?:\\s+gerado)?\\s*}}/gi`),
+> garantindo que mensagens já enviadas não quebrem.
 
 #### Flags adicionais (sem migração obrigatória)
 
@@ -139,7 +145,7 @@ CREATE TABLE IF NOT EXISTS app_settings (
 INSERT INTO app_settings(key, value)
 VALUES (
   'default_link_message',
-  'Olá! Aqui está o link para escolher os itens do seu pedido na nossa galeria: {{link gerado}}'
+  'Olá! Aqui está o link para escolher os itens do seu pedido na nossa galeria: {{link}}'
 )
 ON CONFLICT (key) DO NOTHING;
 ```
@@ -161,7 +167,8 @@ ON CONFLICT (key) DO NOTHING;
 | Método | Rota                                | Descrição                                                                                       |
 | ------ | ----------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `POST` | `/api/order-links`                  | Cria um link novo (quantidade livre entre 1 e 999).                                             |
-| `GET`  | `/api/order-links`                  | Lista paginada com filtros (status, período `created`/`confirmed`, busca por nome/pedido).      |
+| `GET`  | `/api/order-links`                  | Lista paginada com filtros (status `pending`/`confirmed`/`cancelled`, período, busca).          |
+| `PATCH`| `/api/order-links/{id}`             | Body `{ action: 'cancel' }`. Cancela manualmente um link com status `pending`.                  |
 | `GET`  | `/api/settings/link-message`        | Lê o template padrão da mensagem.                                                               |
 | `PUT`  | `/api/settings/link-message`        | Atualiza o template padrão (até 5000 caracteres).                                               |
 | `GET`  | `/api/settings/access-control`      | Lê as flags `catalog_access_restricted` e `auto_register_links_on_confirm`.                     |
@@ -175,6 +182,8 @@ Resposta típica de `POST /api/order-links/validate`:
 { "result": "allowed", "reason": "unrestricted" }
 { "result": "confirmed", "legacy": true }
 { "result": "invalid", "reason": "not_registered" }
+{ "result": "invalid", "reason": "cancelled" }
+{ "result": "invalid", "reason": "mismatch" }
 ```
 
 > `{ "result": "allowed", "reason": "unrestricted" }` só ocorre quando o
@@ -233,14 +242,21 @@ Resposta típica de `POST /api/order-links/validate`:
        ser ligado, o secundário é forçado a `false` (UI + backend).
   4. **Novo link**: Nome (username Shopee), Pedido, Quantidade
      (`Input type="number"` aceitando 1–999), campo "Link gerado"
-     (preenchido em tempo real e copiável), textarea "Mensagem"
-     (inicializa com o template, com pré-visualização) e botão
-     **Registrar Link**.
+     (preenchido em tempo real e copiável; usa apenas `origin` da base, sem
+     sub-paths), textarea "Mensagem" com placeholder `{{link}}` (legado
+     `{{link gerado}}` ainda aceito) e botão **Registrar Link**.
   5. **Modal de sucesso**: exibe URL e mensagem (com quebras de linha) e
      oferece copiar link / copiar mensagem.
-  6. **Filtros** — `Status` em uma linha; `Período` (campo + duas datas +
-     ações) e **Busca** (input + ações) lado a lado em uma segunda linha.
+  6. **Filtros** — `Status` (`Pendentes`, `Confirmados`, `Cancelados`) em
+     uma linha; `Período` (campo + duas datas + ações) e **Busca** (input +
+     ações) lado a lado em uma segunda linha.
   7. **Lista** paginada — mesmo padrão visual da tabela do Dashboard.
+     Cada linha pendente exibe um botão **Cancelar** (ícone `Ban`) que abre
+     um modal de confirmação. Links já confirmados ou cancelados não
+     mostram o botão.
+  8. **Modal de cancelamento**: confirma a operação exibindo Cliente,
+     Pedido e Quantidade. Ao confirmar, chama `PATCH /api/order-links/{id}`
+     com `{ action: 'cancel' }` e atualiza a lista.
 
 ---
 
@@ -299,6 +315,34 @@ Em todos os cenários, links já registrados como `pending` continuam
 sendo validados normalmente: mismatch de nome/quantidade ainda retorna
 `{ result: 'invalid', reason: 'mismatch' }` para preservar a integridade
 dos links efetivamente registrados.
+
+---
+
+## Cancelamento de links
+
+Existem dois caminhos para um link chegar ao status `cancelled`:
+
+1. **Manual no admin**, via botão **Cancelar** na lista de `/admin/links`.
+   - Disponível **apenas** para links com status `pending`. Links já
+     `confirmed` não exibem o botão (a operação só faz sentido cancelando
+     o pedido associado em `/orders`).
+   - Endpoint: `PATCH /api/order-links/{id}` com `{ action: 'cancel' }`.
+2. **Automático ao cancelar o pedido em `/orders`**.
+   - `cancelOrder(id)` agora roda em transação: além do `UPDATE orders SET
+     canceled_at = NOW()`, executa
+     `UPDATE order_links SET status='cancelled' WHERE order_id = $1 AND
+     status <> 'cancelled'`. Idempotente e no-op quando o pedido nunca
+     teve link associado (ex.: cenário legacy).
+
+Efeitos em downstream:
+
+- `POST /api/order-links/validate` retorna `{ result: 'invalid', reason:
+  'cancelled' }` quando o cliente tenta reabrir o link cancelado → tela
+  "URL Inválida" no `/`.
+- `createOrderWithLinkConfirmation` rejeita explicitamente links
+  `cancelled` com erro amigável (HTTP 400 em `POST /api/orders`),
+  evitando que `localStorage` contaminado consiga forçar a criação de um
+  pedido para um link cancelado.
 
 ---
 
@@ -374,3 +418,21 @@ dos links efetivamente registrados.
     duplicado é gerado.
 17. Layout: `/admin/links` mostra `Status` na linha 1 e `Período` + `Busca`
     lado a lado na linha 2 (em telas estreitas, empilham verticalmente).
+
+### Cenários adicionais para cancelamento
+
+18. Admin clica **Cancelar** em um link `pending` → modal de confirmação
+    aparece com Cliente/Pedido/Quantidade → confirma → tabela mostra o
+    badge vermelho "Cancelado". O botão Cancelar some.
+19. Cliente reabre a URL de um link `cancelled` → tela "URL Inválida"
+    (`reason: cancelled`). Tentativa de bypass via `localStorage` ainda
+    falha em `POST /api/orders` (mensagem "Este link foi cancelado").
+20. Admin cancela o pedido associado em `/orders` → na próxima atualização
+    da lista de `/admin/links`, o link aparece como `cancelled` (mesmo
+    quando estava `confirmed`). Pedidos legados (sem link) não geram nada
+    novo (no-op).
+21. Filtro: marcar apenas "Cancelados" mostra somente os links cancelados
+    (manuais + automáticos). Desmarcar todos é bloqueado pela UI.
+22. Link gerado: `NEXT_PUBLIC_BASE_URL=https://catalogo.lojacenario.com.br/catalogointerativo`
+    produz `https://catalogo.lojacenario.com.br/?nome=...&pedido=...&quantidade=...`
+    (descarta o sub-path).

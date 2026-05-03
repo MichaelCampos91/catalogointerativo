@@ -39,8 +39,10 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { Copy, Link2, Search, CheckCircle2, Save, MessageSquare, Settings } from "lucide-react"
+import { Copy, Link2, Search, CheckCircle2, Save, MessageSquare, Settings, Ban, AlertTriangle } from "lucide-react"
 import { useToast } from "@/hooks/use-sonner-toast"
+
+type OrderLinkStatus = "pending" | "confirmed" | "cancelled"
 
 type OrderLink = {
   id: string
@@ -50,7 +52,7 @@ type OrderLink = {
   message: string | null
   message_template: string | null
   generated_url: string
-  status: "pending" | "confirmed"
+  status: OrderLinkStatus
   created_at: string
   updated_at: string
   confirmed_at: string | null
@@ -58,11 +60,25 @@ type OrderLink = {
 }
 
 const PAGE_SIZE = 20
-const STATUS_OPTIONS: { key: "pending" | "confirmed"; label: string }[] = [
+const STATUS_OPTIONS: { key: OrderLinkStatus; label: string }[] = [
   { key: "pending", label: "Pendentes" },
   { key: "confirmed", label: "Confirmados" },
+  { key: "cancelled", label: "Cancelados" },
 ]
-const PLACEHOLDER_TOKEN = "{{link gerado}}"
+const PLACEHOLDER_TOKEN = "{{link}}"
+// Aceita também o legado `{{link gerado}}` na pré-visualização para mensagens
+// que ainda usam o marcador antigo.
+const PLACEHOLDER_REGEX = /{{\s*link(?:\s+gerado)?\s*}}/gi
+
+function extractOrigin(value: string): string {
+  if (!value) return ""
+  try {
+    const candidate = /^https?:\/\//i.test(value) ? value : `https://${value}`
+    return new URL(candidate).origin
+  } catch {
+    return value.replace(/\/+$/, "")
+  }
+}
 
 function buildPreviewUrl(name: string, orderNumber: string, quantity: string): string {
   const trimmedName = name.trim()
@@ -71,10 +87,10 @@ function buildPreviewUrl(name: string, orderNumber: string, quantity: string): s
   if (!trimmedName || !trimmedOrder || !Number.isInteger(qtyNumber) || qtyNumber <= 0) {
     return ""
   }
-  const base =
+  const rawBase =
     (process.env.NEXT_PUBLIC_BASE_URL && process.env.NEXT_PUBLIC_BASE_URL.trim()) ||
     (typeof window !== "undefined" ? window.location.origin : "")
-  const trimmedBase = base.replace(/\/+$/, "")
+  const trimmedBase = extractOrigin(rawBase)
   const query = new URLSearchParams({
     nome: trimmedName,
     pedido: trimmedOrder,
@@ -111,6 +127,10 @@ export default function AdminLinksPage() {
   const [messageModalOpen, setMessageModalOpen] = useState(false)
   const [settingsModalOpen, setSettingsModalOpen] = useState(false)
 
+  // Modal de confirmação para cancelar link
+  const [cancelTarget, setCancelTarget] = useState<OrderLink | null>(null)
+  const [cancelling, setCancelling] = useState(false)
+
   // Configurações de acesso
   type AccessSettings = {
     catalog_access_restricted: boolean
@@ -128,9 +148,10 @@ export default function AdminLinksPage() {
   const [savingAccessSettings, setSavingAccessSettings] = useState(false)
 
   // Filters / list
-  const [statusFilters, setStatusFilters] = useState<Record<"pending" | "confirmed", boolean>>({
+  const [statusFilters, setStatusFilters] = useState<Record<OrderLinkStatus, boolean>>({
     pending: true,
     confirmed: true,
+    cancelled: true,
   })
   const [periodFromDraft, setPeriodFromDraft] = useState("")
   const [periodToDraft, setPeriodToDraft] = useState("")
@@ -246,10 +267,10 @@ export default function AdminLinksPage() {
     [customerName, orderNumber, quantity],
   )
 
-  // Mensagem renderizada (substitui {{link gerado}} pelo previewUrl)
+  // Mensagem renderizada: substitui {{link}} (e legado {{link gerado}}) pelo previewUrl
   const renderedMessage = useMemo(() => {
     if (!previewUrl) return messageTemplate
-    return messageTemplate.replace(/{{\s*link gerado\s*}}/gi, previewUrl)
+    return messageTemplate.replace(PLACEHOLDER_REGEX, previewUrl)
   }, [messageTemplate, previewUrl])
 
   const isFormValid = useMemo(() => {
@@ -377,6 +398,33 @@ export default function AdminLinksPage() {
       })
     } finally {
       setRegistering(false)
+    }
+  }
+
+  const handleCancelLink = async () => {
+    if (!cancelTarget) return
+    try {
+      setCancelling(true)
+      const res = await fetch(`/api/order-links/${cancelTarget.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ action: "cancel" }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.error || data.message || "Erro ao cancelar link")
+      }
+      toast.success({ title: "Link cancelado", description: "O status foi alterado para Cancelado." })
+      setCancelTarget(null)
+      await loadLinks(page)
+    } catch (err) {
+      toast.error({
+        title: "Erro ao cancelar link",
+        description: err instanceof Error ? err.message : "Erro desconhecido",
+      })
+    } finally {
+      setCancelling(false)
     }
   }
 
@@ -508,7 +556,8 @@ export default function AdminLinksPage() {
                     onCheckedChange={(checked) => {
                       const next = { ...statusFilters, [key]: !!checked }
                       // Garante pelo menos um selecionado
-                      if (!next.pending && !next.confirmed) return
+                      const anySelected = Object.values(next).some(Boolean)
+                      if (!anySelected) return
                       setStatusFilters(next)
                       setPage(1)
                     }}
@@ -701,6 +750,10 @@ export default function AdminLinksPage() {
                       <TableCell>
                         {link.status === "confirmed" ? (
                           <Badge className="bg-green-100 text-green-700 hover:bg-green-100">Confirmado</Badge>
+                        ) : link.status === "cancelled" ? (
+                          <Badge variant="secondary" className="bg-red-100 text-red-700 hover:bg-red-100">
+                            Cancelado
+                          </Badge>
                         ) : (
                           <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 hover:bg-yellow-100">
                             Pendente
@@ -739,6 +792,17 @@ export default function AdminLinksPage() {
                             >
                               <Copy className="w-3 h-3 mr-1" />
                               Mensagem
+                            </Button>
+                          )}
+                          {link.status === "pending" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                              onClick={() => setCancelTarget(link)}
+                            >
+                              <Ban className="w-3 h-3 mr-1" />
+                              Cancelar
                             </Button>
                           )}
                         </div>
@@ -854,6 +918,61 @@ export default function AdminLinksPage() {
             <Button onClick={handleSaveDefaultTemplate} disabled={defaultTemplateLoading || savingTemplate}>
               <Save className="w-4 h-4 mr-2" />
               {savingTemplate ? "Salvando..." : "Salvar template"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Confirmar cancelamento de link */}
+      <Dialog
+        open={!!cancelTarget}
+        onOpenChange={(open) => {
+          if (!open && !cancelling) setCancelTarget(null)
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <div className="flex justify-center mb-3">
+              <AlertTriangle className="w-10 h-10 text-amber-500" />
+            </div>
+            <DialogTitle className="text-center">Cancelar link</DialogTitle>
+            <DialogDescription className="text-center">
+              O link será marcado como <strong>Cancelado</strong> e o cliente
+              não poderá mais utilizá-lo para fazer um pedido. Esta ação não
+              pode ser desfeita.
+            </DialogDescription>
+          </DialogHeader>
+          {cancelTarget && (
+            <div className="rounded-md border bg-gray-50 p-3 text-sm space-y-1">
+              <p>
+                <span className="text-gray-500">Cliente:</span>{" "}
+                <strong>{cancelTarget.customer_name.toUpperCase()}</strong>
+              </p>
+              <p>
+                <span className="text-gray-500">Pedido:</span>{" "}
+                <strong>{cancelTarget.order_number}</strong>
+              </p>
+              <p>
+                <span className="text-gray-500">Quantidade:</span>{" "}
+                <strong>{cancelTarget.quantity}</strong>
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setCancelTarget(null)}
+              disabled={cancelling}
+            >
+              Voltar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleCancelLink}
+              disabled={cancelling}
+            >
+              <Ban className="w-4 h-4 mr-2" />
+              {cancelling ? "Cancelando..." : "Cancelar link"}
             </Button>
           </DialogFooter>
         </DialogContent>

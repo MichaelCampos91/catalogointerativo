@@ -9,7 +9,7 @@ import {
 import { requireAuth, authErrorResponse } from "@/lib/auth"
 import { buildClientOrderLink } from "@/lib/order-links"
 
-const VALID_STATUSES: OrderLinkStatus[] = ["pending", "confirmed"]
+const VALID_STATUSES: OrderLinkStatus[] = ["pending", "confirmed", "cancelled"]
 
 export async function POST(request: Request) {
   try {
@@ -54,8 +54,10 @@ export async function POST(request: Request) {
       const stored = await getAppSetting("default_link_message")
       messageTemplate = stored ?? ""
     }
+    // Aceita o marcador novo `{{link}}` e o legado `{{link gerado}}` para
+    // não quebrar templates já salvos no banco.
     const finalMessage = messageTemplate
-      ? messageTemplate.replace(/{{\s*link gerado\s*}}/gi, generatedUrl)
+      ? messageTemplate.replace(/{{\s*link(?:\s+gerado)?\s*}}/gi, generatedUrl)
       : null
 
     const link = await createOrderLink({

@@ -717,44 +717,64 @@ export async function cancelOrder(id: string): Promise<Order> {
   let client
   try {
     client = await pool.connect()
-    
+    await client.query("BEGIN")
+
     // Verificar se o pedido existe e não está cancelado ou finalizado
     const checkResult = await client.query(
       `SELECT id, canceled_at, finalized_at FROM orders WHERE id = $1`,
       [id]
     )
-    
+
     if (checkResult.rows.length === 0) {
       throw new Error("Pedido não encontrado")
     }
-    
+
     const order = checkResult.rows[0]
     if (order.canceled_at) {
       throw new Error("Pedido já está cancelado")
     }
-    
+
     if (order.finalized_at) {
       throw new Error("Pedido já está finalizado e não pode ser cancelado")
     }
-    
+
     // Cancelar o pedido
     const result = await client.query(
-      `UPDATE orders 
+      `UPDATE orders
        SET canceled_at = NOW()
        WHERE id = $1 AND canceled_at IS NULL AND finalized_at IS NULL
        RETURNING *`,
       [id],
     )
-    
+
     if (result.rows.length === 0) {
       throw new Error("Não foi possível cancelar o pedido")
     }
-    
+
+    // Propaga o cancelamento para o link associado (se existir).
+    // No-op quando não há link cadastrado para o pedido.
+    await client.query(
+      `UPDATE order_links
+          SET status = 'cancelled', updated_at = NOW()
+        WHERE order_id = $1
+          AND status <> 'cancelled'`,
+      [id]
+    )
+
+    await client.query("COMMIT")
+
     return {
       ...result.rows[0],
       selected_images: result.rows[0].selected_images,
     }
   } catch (error) {
+    if (client) {
+      try {
+        await client.query("ROLLBACK")
+      } catch (rollbackError) {
+        console.error("Erro ao executar ROLLBACK em cancelOrder:", rollbackError)
+      }
+    }
     console.error("Erro ao cancelar pedido:", error)
     throw error
   } finally {
@@ -891,7 +911,7 @@ export async function getProductionBatchOrders(batchId: string): Promise<Order[]
 
 // --- Order Links (controle de acesso ao modo pedido) ---
 
-export type OrderLinkStatus = "pending" | "confirmed"
+export type OrderLinkStatus = "pending" | "confirmed" | "cancelled"
 
 export type OrderLink = {
   id: string
@@ -978,6 +998,46 @@ export async function getOrderLinkByOrderNumber(orderNumber: string): Promise<Or
     return result.rows[0] as OrderLink
   } catch (error) {
     console.error("Erro ao buscar link por número de pedido:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+/**
+ * Cancela um link (status -> 'cancelled') por id. Apenas links com status
+ * 'pending' podem ser cancelados manualmente — links 'confirmed' devem ser
+ * cancelados via cancelamento do pedido em /orders (que propaga para o link)
+ * e links já 'cancelled' são no-op (idempotente).
+ */
+export async function cancelOrderLink(id: string): Promise<OrderLink> {
+  let client
+  try {
+    client = await pool.connect()
+    const existing = await client.query(
+      `SELECT * FROM order_links WHERE id = $1`,
+      [id]
+    )
+    if (existing.rows.length === 0) {
+      throw new Error("Link não encontrado")
+    }
+    const link = existing.rows[0] as OrderLink
+    if (link.status === "cancelled") return link
+    if (link.status === "confirmed") {
+      throw new Error(
+        "Este link já foi confirmado. Cancele o pedido relacionado em 'Pedidos' para reverter."
+      )
+    }
+    const result = await client.query(
+      `UPDATE order_links
+          SET status = 'cancelled', updated_at = NOW()
+        WHERE id = $1
+      RETURNING *`,
+      [id]
+    )
+    return result.rows[0] as OrderLink
+  } catch (error) {
+    console.error("Erro ao cancelar link:", error)
     throw error
   } finally {
     if (client) client.release()
@@ -1226,6 +1286,9 @@ export async function createOrderWithLinkConfirmation(
     if (existingLink) {
       if (existingLink.status === "confirmed") {
         throw new Error("Este pedido já foi confirmado e não pode ser refeito")
+      }
+      if (existingLink.status === "cancelled") {
+        throw new Error("Este link foi cancelado e não pode ser utilizado")
       }
       if (existingLink.customer_name.trim().toLowerCase() !== order.customer_name.trim().toLowerCase()) {
         throw new Error("Os dados do pedido não conferem com o link registrado")

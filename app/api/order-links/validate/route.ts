@@ -36,6 +36,10 @@ export async function POST(request: Request) {
       if (link.status === "confirmed") {
         return NextResponse.json({ result: "confirmed" }, { status: 200 })
       }
+      if (link.status === "cancelled") {
+        // Link cancelado: trata como inválido para encerrar o acesso pelo cliente.
+        return NextResponse.json({ result: "invalid", reason: "cancelled" }, { status: 200 })
+      }
       const matchesName = link.customer_name.trim().toLowerCase() === name.toLowerCase()
       const matchesQty = link.quantity === quantity
       if (!matchesName || !matchesQty) {

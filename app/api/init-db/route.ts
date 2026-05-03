@@ -160,7 +160,7 @@ export async function POST() {
        ON CONFLICT (key) DO NOTHING`,
       [
         "default_link_message",
-        "Olá! Aqui está o link para escolher os itens do seu pedido na nossa galeria: {{link gerado}}",
+        "Olá! Aqui está o link para escolher os itens do seu pedido na nossa galeria: {{link}}",
       ]
     )
     console.log("API: Tabela app_settings criada/verificada (com seed default_link_message)")
