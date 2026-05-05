@@ -1,123 +1,165 @@
 "use client"
 
 import { Suspense, useEffect, useState } from "react"
+import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Card, CardContent } from "@/components/ui/card"
-import { Unlink } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Crown, Images, MessageCircle } from "lucide-react"
+import { buildWhatsAppLink, WHATSAPP_NUMBERS } from "@/lib/whatsapp"
 
-type ValidationState =
-  | { status: "loading" }
-  | { status: "no_params" }
-  | { status: "invalid"; reason?: string }
+const MSG_ORCAMENTO = "Olá, gostaria de fazer um orçamento de painéis sublimados."
+const MSG_GRUPO_VIP = "Olá, quero entrar no Grupo VIP para decoradores."
+const INSTAGRAM_URL = "https://www.instagram.com/cenario.ff"
 
-function ClientLandingInner() {
+/**
+ * Página raiz.
+ *
+ * Sem parâmetros → landing pública (acesso aberto a todos) com CTAs para
+ * visualizar o catálogo, abrir conversa no WhatsApp (orçamento ou Grupo VIP)
+ * e seguir a Cenario no Instagram.
+ *
+ * Com `nome`/`pedido`/`quantidade` → redireciona para `/fazer-pedido` com a
+ * mesma query, preservando integralmente os links já enviados aos clientes.
+ */
+function HomeInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [state, setState] = useState<ValidationState>({ status: "loading" })
+  const [redirecting, setRedirecting] = useState(false)
 
   useEffect(() => {
     const name = (searchParams.get("nome") ?? "").trim()
     const orderNumber = (searchParams.get("pedido") ?? "").trim()
     const quantityStr = (searchParams.get("quantidade") ?? "").trim()
-
-    // Sem params: cliente está apenas visualizando o catálogo.
-    if (!name && !orderNumber && !quantityStr) {
-      setState({ status: "no_params" })
-      router.replace("/catalog")
-      return
-    }
-
     const quantity = Number.parseInt(quantityStr, 10)
-    if (!name || !orderNumber || !Number.isInteger(quantity) || quantity <= 0) {
-      setState({ status: "invalid", reason: "params" })
-      return
-    }
 
-    let cancelled = false
-    ;(async () => {
-      try {
-        const res = await fetch("/api/order-links/validate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, orderNumber, quantity }),
-        })
-        const data = await res.json().catch(() => ({}))
-        if (cancelled) return
+    const hasAnyParam = !!(name || orderNumber || quantityStr)
+    const hasValidPedidoParams =
+      !!name && !!orderNumber && Number.isInteger(quantity) && quantity > 0
 
-        if (data.result === "allowed") {
-          // Persistência por pedido (carrinho permanece entre acessos do mesmo link).
-          const customerData = {
-            name,
-            orderNumber,
-            quantity,
-            timestamp: new Date().toISOString(),
-          }
-          try {
-            const previousRaw = localStorage.getItem("customerData")
-            const previous = previousRaw ? JSON.parse(previousRaw) : null
-            if (previous && previous.orderNumber && previous.orderNumber !== orderNumber) {
-              // Trocou de link: limpa carrinho e timer do pedido anterior.
-              localStorage.removeItem(`selectedImages:${previous.orderNumber}`)
-              localStorage.removeItem(`catalogTimer:${previous.orderNumber}`)
-              localStorage.removeItem(`imageCache:${previous.orderNumber}`)
-            }
-          } catch {
-            // localStorage indisponível: ignora.
-          }
-          localStorage.setItem("customerData", JSON.stringify(customerData))
-          localStorage.setItem("sessionLocked", "true")
-          router.replace("/catalog")
-          return
-        }
+    if (!hasAnyParam) return
 
-        if (data.result === "confirmed") {
-          router.replace(`/confirmed/${encodeURIComponent(orderNumber)}`)
-          return
-        }
+    // Se a query veio (mesmo parcial), o intuito é fazer pedido. Encaminha
+    // para /fazer-pedido preservando a query original — a validação completa
+    // (incluindo erro "URL Inválida" para params malformados) acontece lá.
+    setRedirecting(true)
+    const qs = searchParams.toString()
+    router.replace(qs ? `/fazer-pedido?${qs}` : "/fazer-pedido")
+  }, [searchParams, router])
 
-        setState({ status: "invalid", reason: data.reason })
-      } catch (error) {
-        console.error("Erro ao validar link:", error)
-        if (!cancelled) {
-          setState({ status: "invalid", reason: "network" })
-        }
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams])
-
-  if (state.status === "invalid") {
+  if (redirecting) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardContent className="p-8 text-center space-y-4">
-            <div className="flex justify-center">
-              <img src="/logo.png" alt="Logo" className="w-[150px]" />
-            </div>
-            <div className="flex justify-center">
-              <Unlink className="w-12 h-12 text-red-500" />
-            </div>
-            <h1 className="text-xl font-bold text-gray-900">URL Inválida</h1>
-            <p className="text-sm text-gray-600">
-              Esta URL não é válida ou não está mais disponível. Verifique o link
-              recebido ou entre em contato com a Cenario.
-            </p>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4" />
+          <p className="text-sm text-gray-600">Carregando...</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-      <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
-        <p className="text-sm text-gray-600">Carregando...</p>
-      </div>
+    <div className="flex h-screen flex-col bg-gray-50">
+      {/* Logo fixa no topo */}
+      <header className="shrink-0 bg-white border-b">
+        <div className="max-w-lg mx-auto px-4 py-3 flex justify-center">
+          <img src="/logo.png" alt="Cenario" className="w-[120px]" />
+        </div>
+      </header>
+
+      {/* Conteúdo rolável */}
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-lg mx-auto px-4 py-8 space-y-10">
+          {/* Seção 1: Catálogo */}
+          <section className="space-y-3 text-center">
+            <h1 className="text-xl font-bold text-gray-900">
+              Mini Painéis Redondos
+            </h1>
+            <p className="text-sm text-gray-600">
+              Confira nosso catálogo de Mini Painéis Redondos 50cm
+            </p>
+            <Link
+              href="/ver-catalogo"
+              className="block w-full max-w-[350px] mx-auto"
+            >
+              <Button size="lg" className="w-full text-base font-medium uppercase">
+                <Images className="w-4 h-4 mr-2" />
+                Ver Catálogo
+              </Button>
+            </Link>
+          </section>
+
+          {/* Seção 2: Orçamento sublimados */}
+          <section className="space-y-3 text-center">
+            <h2 className="text-xl font-bold text-gray-900">
+              Painéis e Pisos Sublimados Sob Medida
+            </h2>
+            <p className="text-sm text-gray-600">
+              🇧🇷 Enviamos para todo o Brasil.
+            </p>
+            <a
+              href={buildWhatsAppLink(MSG_ORCAMENTO, WHATSAPP_NUMBERS.orcamento)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block w-full max-w-[350px] mx-auto"
+            >
+              <Button size="lg" className="w-full text-base font-medium uppercase">
+                <MessageCircle className="w-4 h-4 mr-2" />
+                Orçamento por WhatsApp
+              </Button>
+            </a>
+          </section>
+
+          {/* Seção 3: Grupo VIP */}
+          <section className="space-y-3 text-center">
+            <h2 className="text-xl font-bold text-gray-900">
+              Entre no Grupo VIP para Decoradores
+            </h2>
+            <p className="text-sm text-gray-600">
+              Promoções Exclusivas e Queimas de Estoque todo os meses. 🔥
+            </p>
+            <a
+              href={buildWhatsAppLink(MSG_GRUPO_VIP)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block w-full max-w-[350px] mx-auto"
+            >
+              <Button size="lg" className="w-full text-base font-medium uppercase">
+                <Crown className="w-4 h-4 mr-2" />
+                Quero entrar no Grupo VIP
+              </Button>
+            </a>
+          </section>
+
+          {/* Seção 4: Instagram */}
+          <section className="space-y-3 text-center">
+            <h2 className="text-xl font-bold text-gray-900">
+              Siga a Cenario no Instagram
+            </h2>
+            <a
+              href={INSTAGRAM_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Abrir perfil @cenario.ff no Instagram"
+              className="block w-[70%] max-w-[300px] mx-auto"
+            >
+              <img
+                src="/perfil-social.png"
+                alt="Perfil @cenario.ff no Instagram"
+                className="w-full rounded-2xl shadow-lg transition-transform duration-200 hover:scale-105"
+                draggable={false}
+              />
+            </a>
+          </section>
+        </div>
+      </main>
+
+      {/* Rodapé fixo */}
+      <footer className="shrink-0 bg-white border-t">
+        <div className="max-w-lg mx-auto px-4 py-3 text-center text-xs text-gray-600 leading-relaxed">
+          <p className="font-bold">Cenario | Birigui-SP</p>
+          <p>42.480.518/0001-10</p>
+        </div>
+      </footer>
     </div>
   )
 }
@@ -128,13 +170,13 @@ export default function HomePage() {
       fallback={
         <div className="min-h-screen bg-gray-100 flex items-center justify-center">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4" />
             <p className="text-sm text-gray-600">Carregando...</p>
           </div>
         </div>
       }
     >
-      <ClientLandingInner />
+      <HomeInner />
     </Suspense>
   )
 }

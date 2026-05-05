@@ -101,7 +101,7 @@ export default function CustomerOrdersPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <img className="w-[120px]" src="/logo.png" alt="Logo" />
-          <Button variant="outline" onClick={() => router.push("/catalog")}>
+          <Button variant="outline" onClick={() => router.push("/ver-catalogo")}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             Voltar ao catálogo
           </Button>

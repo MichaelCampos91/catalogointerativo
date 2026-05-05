@@ -1,0 +1,1171 @@
+"use client"
+
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { ArrowLeft, Check, AlertCircle, Search, AlertTriangle, Minus, Plus } from "lucide-react"
+import { usePathname, useRouter } from "next/navigation"
+import { Input } from "@/components/ui/input"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { toast } from "sonner"
+
+type Category = {
+  id: string
+  name: string
+  slug: string
+}
+
+type CatalogImage = {
+  id: string
+  code: string
+  category_id: string
+  image_url: string
+  thumbnail_url: string | null
+}
+
+type PaginationInfo = {
+  total: number
+  page: number
+  limit: number
+  totalPages: number
+}
+
+export type CatalogViewMode = "order" | "view"
+
+type CatalogViewProps = {
+  /**
+   * - `order`: comportamento padrão (idêntico ao antigo `/catalog` com
+   *   `customerData` em localStorage). Hidrata o pedido em andamento,
+   *   habilita seleção, cronômetro, validação em background e POST
+   *   `/api/orders`.
+   * - `view`: força modo visualização puro. Ignora `customerData`, não
+   *   habilita seleção, cronômetro nem validação em background. Aberto
+   *   a qualquer cliente, inclusive os que têm um pedido em andamento.
+   *
+   * Default: `order` (preserva o comportamento histórico para
+   *  consumidores legados).
+   */
+  mode?: CatalogViewMode
+}
+
+export default function CatalogView({ mode = "order" }: CatalogViewProps) {
+  const [categories, setCategories] = useState<Category[]>([])
+  const [images, setImages] = useState<CatalogImage[]>([])
+  const [selectedImages, setSelectedImages] = useState<string[]>([])
+  const [customerData, setCustomerData] = useState<{ name: string; quantity: number; orderNumber: string } | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false)
+  const [isIncreaseConfirmOpen, setIsIncreaseConfirmOpen] = useState(false)
+  const [pendingIncrease, setPendingIncrease] = useState<{
+    imageCode: string
+    currentQty: number
+    nextQty: number
+  } | null>(null)
+  const [isAware, setIsAware] = useState(false)
+  const [pagination, setPagination] = useState<PaginationInfo>({
+    total: 0,
+    page: 1,
+    limit: 50,
+    totalPages: 1
+  })
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [timeLeft, setTimeLeft] = useState<number>(24 * 60 * 60) // 24 horas em segundos
+  const [imagesCache, setImagesCache] = useState<Record<string, { code: string; image_url: string; category_id: string }>>({})
+  const [trendingImages, setTrendingImages] = useState<CatalogImage[]>([])
+  const router = useRouter()
+  const pathname = usePathname()
+  const selectedCounts = useMemo(
+    () =>
+      selectedImages.reduce<Record<string, number>>((acc, code) => {
+        acc[code] = (acc[code] ?? 0) + 1
+        return acc
+      }, {}),
+    [selectedImages],
+  )
+  const selectedItems = useMemo(
+    () =>
+      Object.entries(selectedCounts).map(([code, quantity]) => ({
+        code,
+        quantity,
+      })),
+    [selectedCounts],
+  )
+  const increasePreviewImageUrl = useMemo(() => {
+    if (!pendingIncrease) return null
+    const cachedUrl = imagesCache[pendingIncrease.imageCode]?.image_url
+    if (cachedUrl) return cachedUrl
+    const fromImages = images.find((img) => img.code === pendingIncrease.imageCode)?.image_url
+    if (fromImages) return fromImages
+    const fromTrending = trendingImages.find((img) => img.code === pendingIncrease.imageCode)?.image_url
+    return fromTrending ?? null
+  }, [pendingIncrease, imagesCache, images, trendingImages])
+
+  // Constantes para cache
+  const CACHE_EXPIRATION = 3600000 // 1 hora em milissegundos
+  const CATALOG_CACHE_KEY = 'catalogData'
+  
+  // Função auxiliar para validar e recuperar cache com timestamp
+  const getValidCache = <T,>(key: string): T | null => {
+    try {
+      const cached = localStorage.getItem(key)
+      if (!cached) return null
+      
+      const parsed = JSON.parse(cached)
+      if (!parsed.timestamp || !parsed.expiresAt) return null
+      
+      // Verificar se o cache ainda é válido
+      if (Date.now() >= parsed.expiresAt) {
+        localStorage.removeItem(key)
+        return null
+      }
+      
+      return parsed.data as T
+    } catch {
+      return null
+    }
+  }
+  
+  // Função auxiliar para salvar cache com timestamp
+  const setCacheWithTimestamp = <T,>(key: string, data: T): void => {
+    try {
+      const now = Date.now()
+      const cacheEntry = {
+        data,
+        timestamp: now,
+        expiresAt: now + CACHE_EXPIRATION
+      }
+      localStorage.setItem(key, JSON.stringify(cacheEntry))
+    } catch (error) {
+      console.error('Erro ao salvar cache:', error)
+    }
+  }
+  
+  // Limpar caches expirados
+  const cleanupExpiredCaches = (): void => {
+    const keysToCheck = [CATALOG_CACHE_KEY]
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && key.startsWith("imageCache:")) {
+        keysToCheck.push(key)
+      }
+    }
+    
+    keysToCheck.forEach(key => {
+      try {
+        const cached = localStorage.getItem(key)
+        if (cached) {
+          const parsed = JSON.parse(cached)
+          if (parsed.expiresAt && Date.now() >= parsed.expiresAt) {
+            localStorage.removeItem(key)
+          }
+        }
+      } catch {
+        // Ignorar erros de parsing
+      }
+    })
+  }
+
+  useEffect(() => {
+    // Limpar caches expirados ao inicializar
+    cleanupExpiredCaches()
+
+    // Em modo `view`, NUNCA hidratamos `customerData` do localStorage:
+    // mesmo um cliente com pedido em andamento vê apenas a visualização.
+    if (mode === "order") {
+      const data = localStorage.getItem("customerData")
+      let parsed: { name: string; orderNumber: string; quantity: number } | null = null
+      if (data) {
+        parsed = JSON.parse(data)
+        setCustomerData(parsed)
+        // Limpar caches de pedidos diferentes e carregar cache do pedido atual
+        const currentCacheKey = `imageCache:${parsed!.orderNumber}`
+        const keysToRemove: string[] = []
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i)
+          if (k && k.startsWith("imageCache:") && k !== currentCacheKey) {
+            keysToRemove.push(k)
+          }
+        }
+        keysToRemove.forEach((k) => localStorage.removeItem(k))
+
+        // Carregar cache válido de imagens
+        const cachedImages = getValidCache<Record<string, { code: string; image_url: string; category_id: string }>>(currentCacheKey)
+        if (cachedImages) {
+          setImagesCache(cachedImages)
+        }
+      }
+
+      // Carregar itens selecionados do pedido atual (chave por orderNumber).
+      // Compatibilidade: migra `selectedImages` legado se existir.
+      if (parsed?.orderNumber) {
+        const savedSelectedImages = localStorage.getItem(`selectedImages:${parsed.orderNumber}`)
+        if (savedSelectedImages) {
+          setSelectedImages(JSON.parse(savedSelectedImages))
+        } else {
+          const legacy = localStorage.getItem("selectedImages")
+          if (legacy) {
+            try {
+              const arr = JSON.parse(legacy)
+              if (Array.isArray(arr) && arr.length > 0) {
+                setSelectedImages(arr)
+                localStorage.setItem(`selectedImages:${parsed.orderNumber}`, legacy)
+              }
+            } catch {
+              // ignora payload legado inválido
+            }
+            localStorage.removeItem("selectedImages")
+          }
+        }
+      } else {
+        // Sem customerData hidratado em modo order: garante que não há
+        // resíduo de seleção legado no slot global.
+        localStorage.removeItem("selectedImages")
+      }
+
+      // Inicializar o cronômetro apenas se houver dados do cliente.
+      // Chaveado por orderNumber para preservar entre acessos do mesmo link.
+      if (parsed?.orderNumber) {
+        const timerKey = `catalogTimer:${parsed.orderNumber}`
+        let savedTime = localStorage.getItem(timerKey)
+        // Migração suave do timer global legado para o keyado por pedido.
+        if (!savedTime) {
+          const legacy = localStorage.getItem("catalogTimer")
+          if (legacy) {
+            savedTime = legacy
+            localStorage.setItem(timerKey, legacy)
+          }
+          localStorage.removeItem("catalogTimer")
+        }
+        if (savedTime) {
+          const endTime = parseInt(savedTime)
+          const now = Math.floor(Date.now() / 1000)
+          const remaining = Math.max(0, endTime - now)
+          setTimeLeft(remaining)
+        } else {
+          const endTime = Math.floor(Date.now() / 1000) + (2 * 60 * 60)
+          localStorage.setItem(timerKey, endTime.toString())
+        }
+      }
+    }
+
+    loadCatalogData()
+
+    // Tendências (falha isolada: mantém [])
+    ;(async () => {
+      try {
+        const res = await fetch("/api/catalog/trends")
+        if (!res.ok) return
+        const data = await res.json()
+        if (!Array.isArray(data.images)) return
+        const mapped: CatalogImage[] = data.images.map((img: { code: string; url: string; category_id: string }) => ({
+          id: img.code,
+          code: img.code,
+          category_id: img.category_id,
+          image_url: img.url,
+          thumbnail_url: null,
+        }))
+        setTrendingImages(mapped)
+      } catch {
+        // silencioso
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Validação em background: garante que somente links válidos/pendentes acessem o modo pedido.
+  // Naturalmente desligado em modo `view` (customerData fica null).
+  useEffect(() => {
+    if (!customerData) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch("/api/order-links/validate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: customerData.name,
+            orderNumber: customerData.orderNumber,
+            quantity: customerData.quantity,
+          }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (cancelled) return
+        if (data.result === "confirmed") {
+          // Link já confirmado (ou pedido legado): redireciona para /confirmed.
+          router.replace(`/confirmed/${encodeURIComponent(customerData.orderNumber)}`)
+        } else if (data.result === "invalid") {
+          // Link inválido / dados manipulados: limpa sessão e volta à raiz.
+          try {
+            localStorage.removeItem("customerData")
+            localStorage.removeItem("sessionLocked")
+            localStorage.removeItem(`selectedImages:${customerData.orderNumber}`)
+            localStorage.removeItem(`catalogTimer:${customerData.orderNumber}`)
+          } catch {
+            // localStorage indisponível
+          }
+          router.replace("/")
+        }
+      } catch (error) {
+        // Falha de rede: mantém o modo atual (UX mais tolerante; servidor revalida na confirmação).
+        console.warn("Validação de link em background falhou:", error)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerData?.orderNumber])
+
+  // Efeito para atualizar o cronômetro
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 0) {
+          clearInterval(timer)
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [])
+
+  // Efeito para salvar itens selecionados no localStorage (chave por orderNumber)
+  useEffect(() => {
+    if (!customerData?.orderNumber) return
+    const key = `selectedImages:${customerData.orderNumber}`
+    if (selectedImages.length > 0) {
+      localStorage.setItem(key, JSON.stringify(selectedImages))
+    } else {
+      localStorage.removeItem(key)
+    }
+  }, [selectedImages, customerData])
+
+  useEffect(() => {
+    if (!isSelectionComplete) {
+      setIsAware(false)
+    }
+  }, [selectedImages.length])
+
+  // Prefetch de itens ausentes no cache ao abrir o modal
+  useEffect(() => {
+    const prefetchMissing = async () => {
+      if (!showConfirmDialog || !customerData) return
+      const missing = selectedImages.filter((code) => !imagesCache[code])
+      if (missing.length === 0) return
+      try {
+        const res = await fetch(`/api/public-catalog?all=true&limit=9999&page=1`)
+        if (!res.ok) return
+        const j = await res.json()
+        const fetched: Record<string, { code: string; image_url: string; category_id: string }> = {}
+        // Tentar resolver pelos arrays "images" (diretório atual)
+        if (Array.isArray(j.images)) {
+          for (const img of j.images) {
+            if (missing.includes(img.code)) {
+              fetched[img.code] = { code: img.code, image_url: img.url, category_id: img.category || '' }
+            }
+          }
+        }
+        // Tentar resolver pelos arrays aninhados em categorias
+        if (Array.isArray(j.categories)) {
+          for (const cat of j.categories) {
+            if (Array.isArray(cat.images)) {
+              for (const img of cat.images) {
+                if (missing.includes(img.code)) {
+                  fetched[img.code] = { code: img.code, image_url: img.url, category_id: cat.id || cat.name }
+                }
+              }
+            }
+          }
+        }
+        if (Object.keys(fetched).length > 0) {
+          setImagesCache((prev) => {
+            const merged = { ...prev, ...fetched }
+            const codes = Object.keys(merged)
+            if (codes.length > 200) {
+              const prioritized = new Set<string>(selectedImages)
+              const result: Record<string, { code: string; image_url: string; category_id: string }> = {}
+              for (const code of codes) {
+                if (prioritized.has(code)) result[code] = merged[code]
+              }
+              for (const code of codes) {
+                if (!result[code]) {
+                  result[code] = merged[code]
+                  if (Object.keys(result).length >= 200) break
+                }
+              }
+              setCacheWithTimestamp(`imageCache:${customerData.orderNumber}`, result)
+              return result
+            }
+            setCacheWithTimestamp(`imageCache:${customerData.orderNumber}`, merged)
+            return merged
+          })
+        }
+      } catch {}
+    }
+    prefetchMissing()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showConfirmDialog])
+
+  // Função para formatar o tempo restante
+  const formatTimeLeft = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`
+  }
+
+  // Função para carregar dados do catálogo
+  const loadCatalogData = async (page = 1, search = "") => {
+    try {
+      setError(null)
+      
+      // Verificar cache apenas na primeira página e sem busca
+      if (page === 1 && !search) {
+        const cachedData = getValidCache<any>(CATALOG_CACHE_KEY)
+        if (cachedData) {
+          console.log('✅ Usando cache do catálogo')
+          setCategories(cachedData.categories || [])
+          setImages(cachedData.images || [])
+          setPagination(cachedData.pagination || pagination)
+          
+          // Atualizar cache de imagens
+          if (customerData) {
+            const updatedCache: Record<string, { code: string; image_url: string; category_id: string }> = {}
+            cachedData.images?.forEach((img: any) => {
+              updatedCache[img.code] = { code: img.code, image_url: img.image_url, category_id: img.category_id }
+            })
+            if (Object.keys(updatedCache).length > 0) {
+              setImagesCache((prev) => {
+                const merged = { ...prev, ...updatedCache }
+                const cacheKey = `imageCache:${customerData.orderNumber}`
+                setCacheWithTimestamp(cacheKey, merged)
+                return merged
+              })
+            }
+          }
+          
+          return
+        }
+      }
+      
+      if (page === 1) {
+        setLoading(true)
+      } else {
+        setLoadingMore(true)
+      }
+
+      const queryParams = new URLSearchParams({
+        page: page.toString(),
+        limit: pagination.limit.toString(),
+      })
+      if (search) {
+        queryParams.append('search', search)
+      }
+
+      // Chamar endpoint público de catálogo (sem exigir autenticação)
+      const response = await fetch(`/api/public-catalog?${queryParams.toString()}`)
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(`Erro ao carregar catálogo: ${errorData.message || response.status}`)
+      }
+      const data = await response.json()
+
+      // DEBUG: Exibir o termo buscado e o resultado retornado
+      // console.log('[CATALOG SEARCH] Termo buscado:', search)
+      // console.log('[CATALOG SEARCH] Categorias retornadas:', data.categories)
+      // console.log('[CATALOG SEARCH] Imagens retornadas:', data.categories.flatMap((cat: any) => cat.images))
+
+      // Adaptar para novo formato
+      const newCategories = data.categories.map((cat: any) => ({
+        id: cat.id,
+        name: cat.name,
+        slug: cat.slug,
+      }))
+      const newImages = data.categories.flatMap((cat: any) =>
+        cat.images.map((img: any) => ({
+          id: img.code,
+          code: img.code,
+          category_id: cat.id,
+          image_url: img.url,
+          thumbnail_url: null,
+        }))
+      )
+      if (page === 1) {
+        setCategories(newCategories)
+        setImages(newImages)
+      } else {
+        setCategories((prev) => [...prev, ...newCategories])
+        setImages((prev) => [...prev, ...newImages])
+      }
+      setPagination(data.pagination)
+      
+      // Salvar no cache apenas na primeira página e sem busca
+      if (page === 1 && !search) {
+        setCacheWithTimestamp(CATALOG_CACHE_KEY, {
+          categories: newCategories,
+          images: newImages,
+          pagination: data.pagination
+        })
+      }
+      
+      // Atualizar cache de imagens vistas e persistir por pedido (cap 200)
+      if (customerData) {
+        setImagesCache((prev) => {
+          const updated: Record<string, { code: string; image_url: string; category_id: string }> = { ...prev }
+          for (const img of newImages) {
+            updated[img.code] = { code: img.code, image_url: img.image_url, category_id: img.category_id }
+          }
+          const codes = Object.keys(updated)
+          if (codes.length > 200) {
+            const prioritized = new Set<string>(selectedImages)
+            const result: Record<string, { code: string; image_url: string; category_id: string }> = {}
+            for (const code of codes) {
+              if (prioritized.has(code)) {
+                result[code] = updated[code]
+              }
+            }
+            for (const code of codes) {
+              if (!result[code]) {
+                result[code] = updated[code]
+                if (Object.keys(result).length >= 200) break
+              }
+            }
+            setCacheWithTimestamp(`imageCache:${customerData.orderNumber}`, result)
+            return result
+          }
+          setCacheWithTimestamp(`imageCache:${customerData.orderNumber}`, updated)
+          return updated
+        })
+      }
+    } catch (error) {
+      console.error("Erro ao carregar dados:", error)
+      setError(error instanceof Error ? error.message : "Erro desconhecido ao carregar dados")
+    } finally {
+      setLoading(false)
+      setLoadingMore(false)
+    }
+  }
+
+  // Debounce para busca:
+  // - 0 caracteres: recarrega catálogo completo (limpou o campo)
+  // - 1 ou 2 caracteres: não dispara busca (aguarda o usuário digitar mais)
+  // - 3+ caracteres: dispara busca após 1,5s de inatividade
+  const debounceTimeout = useRef<NodeJS.Timeout | null>(null)
+  useEffect(() => {
+    if (debounceTimeout.current) {
+      clearTimeout(debounceTimeout.current)
+    }
+    const trimmed = searchQuery.trim()
+    if (trimmed.length > 0 && trimmed.length < 3) {
+      return
+    }
+    debounceTimeout.current = setTimeout(() => {
+      loadCatalogData(1, searchQuery)
+    }, trimmed.length === 0 ? 600 : 1500)
+    return () => {
+      if (debounceTimeout.current) {
+        clearTimeout(debounceTimeout.current)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery])
+
+  // Atualizar scroll para paginação
+  const loadMore = () => {
+    if (pagination.page < pagination.totalPages && !loadingMore) {
+      loadCatalogData(pagination.page + 1, searchQuery)
+    }
+  }
+
+  // Função para detectar quando o usuário chegou ao final da página
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget
+    if (scrollHeight - scrollTop <= clientHeight * 1.5) {
+      loadMore()
+    }
+  }
+
+  const handleImageSelect = (imageCode: string) => {
+    if (!customerData) return // Não permite seleção no modo de visualização
+    if (selectedImages.length < customerData.quantity) {
+      setSelectedImages((prev) => [...prev, imageCode])
+    }
+  }
+
+  const handleQuantityChange = (imageCode: string, delta: 1 | -1) => {
+    if (!customerData) return
+    if (delta === 1) {
+      if (selectedImages.length >= customerData.quantity) return
+      const currentQty = selectedCounts[imageCode] ?? 0
+      if (currentQty >= 1) {
+        setPendingIncrease({
+          imageCode,
+          currentQty,
+          nextQty: currentQty + 1,
+        })
+        setIsIncreaseConfirmOpen(true)
+        return
+      }
+      setSelectedImages((prev) => [...prev, imageCode])
+      return
+    }
+    setSelectedImages((prev) => {
+      const index = prev.lastIndexOf(imageCode)
+      if (index === -1) return prev
+      const next = [...prev]
+      next.splice(index, 1)
+      return next
+    })
+  }
+
+  const handleCancelIncrease = () => {
+    setIsIncreaseConfirmOpen(false)
+    setPendingIncrease(null)
+  }
+
+  const handleConfirmIncrease = () => {
+    if (!customerData || !pendingIncrease) return
+    setSelectedImages((prev) => {
+      if (prev.length >= customerData.quantity) return prev
+      return [...prev, pendingIncrease.imageCode]
+    })
+    setIsIncreaseConfirmOpen(false)
+    setPendingIncrease(null)
+  }
+
+  const handleRemoveFromSelection = (imageCode: string) => {
+    setSelectedImages((prev) => prev.filter((code) => code !== imageCode))
+  }
+
+  const handleConfirmOrder = async () => {
+    if (!customerData || !isAware) return
+
+    try {
+      setLoading(true)
+      setError(null)
+
+      const message = `Olá! Meu nome é *${customerData.name}* e esses são os temas que escolhi do catálogo:\n\n${selectedImages.map((code) => `*${code}*`).join("\n")} \n Nº do pedido: *${customerData.orderNumber}*`
+
+      const response = await fetch("/api/orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          customer_name: customerData.name,
+          quantity_purchased: customerData.quantity,
+          selected_images: selectedImages,
+          whatsapp_message: message,
+          order: customerData.orderNumber,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.message || "Erro ao salvar pedido")
+      }
+
+      // Sinaliza para a página /confirmed que esta é a primeira visita logo após
+      // a confirmação (o banner "já confirmado" não deve aparecer agora).
+      try {
+        localStorage.setItem(`justConfirmed:${customerData.orderNumber}`, "1")
+      } catch {
+        // localStorage indisponível: sem sinal, banner aparece (UX aceitável).
+      }
+
+      // Limpar localStorage (chaves keyadas por orderNumber + chaves globais)
+      localStorage.removeItem("customerData")
+      localStorage.removeItem("sessionLocked")
+      localStorage.removeItem("selectedImages")
+      localStorage.removeItem("catalogTimer")
+      if (customerData?.orderNumber) {
+        localStorage.removeItem(`selectedImages:${customerData.orderNumber}`)
+        localStorage.removeItem(`catalogTimer:${customerData.orderNumber}`)
+        localStorage.removeItem(`imageCache:${customerData.orderNumber}`)
+      }
+
+      // Limpar estado local
+      setCustomerData(null)
+      setSelectedImages([])
+      setTimeLeft(0)
+      setImagesCache({})
+
+      toast.success("Seu pedido foi confirmado! Conheça outros produtos em nossa loja...")
+
+      // Fechar o modal
+      setShowConfirmDialog(false)
+      setIsAware(false)
+
+      // Redirecionar para a página de confirmação
+      router.push(`/confirmed/${customerData.orderNumber}`)
+    } catch (error) {
+      console.error("Erro ao salvar pedido:", error)
+      setError(error instanceof Error ? error.message : "Erro ao salvar pedido")
+      toast.error(error instanceof Error ? error.message : "Erro ao salvar pedido")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const getImagesByCategory = (categoryId: string) => {
+    return images.filter((img) => img.category_id === categoryId)
+  }
+
+  // Função para filtrar categorias baseado na busca (agora só filtra localmente se searchQuery vazio)
+  const getFilteredCategories = () => {
+    if (!searchQuery.trim()) return categories
+    // Se searchQuery existe, categorias já vêm filtradas do backend
+    return categories
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center overflow-hidden">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+          <p>Carregando catálogo...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 overflow-hidden">
+        <Card className="w-full max-w-md">
+          <CardContent className="p-6 text-center">
+            <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+            <h2 className="text-xl font-bold mb-2">Erro ao Carregar Catálogo</h2>
+            <p className="text-gray-600 mb-4">{error}</p>
+            <div className="space-y-2">
+              <Button onClick={() => loadCatalogData()} className="w-full">
+                Tentar Novamente
+              </Button>
+              <Button variant="outline" onClick={() => router.push(pathname)} className="w-full">
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Voltar ao Início
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  const isSelectionComplete = customerData ? selectedImages.length === customerData.quantity : false
+  const missingCount = customerData ? Math.max(customerData.quantity - selectedImages.length, 0) : 0
+  const filteredCategories = getFilteredCategories()
+
+  return (
+    <div className="min-h-screen bg-gray-50 overflow-hidden">
+      {/* Header fixo */}
+      <div className="sticky top-0 bg-white border-b z-20">
+        <div className="max-w-4xl mx-auto">
+          {/* Nav */}
+          <div className="flex items-center justify-between p-4">
+            
+            <img className="w-[120px]" src="/logo.png" alt="Logo"/>
+            
+            <div className="text-center">
+              {customerData ? (
+                <>
+                  <p className="font-medium">Olá, {customerData.name}!</p>
+                  <Badge variant={isSelectionComplete ? "default" : "secondary"}>
+                    {selectedImages.length}/{customerData.quantity} selecionadas
+                  </Badge>
+                </>
+              ) : (
+                <p className="font-medium">Modo de Visualização</p>
+              )}
+            </div>
+          </div>
+
+          {/* Campo de busca fixo */}
+          <div className="px-4 pb-2">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <Input
+                type="text"
+                placeholder="Buscar Temas..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+          </div>
+
+          {/* Cronômetro - apenas se houver dados do cliente */}
+          {customerData && (
+            <div className="px-4 pb-4 text-center">
+              <p className="text-sm text-gray-600">
+                Você tem <span className="font-bold text-indigo-600">{formatTimeLeft(timeLeft)} hrs</span> para finalizar a seleção.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div 
+        className="max-w-4xl mx-auto p-4 pb-20 overflow-y-auto"
+        style={{ height: 'calc(100vh - 120px)' }}
+        onScroll={handleScroll}
+      >
+        {/* Tendências: topo, mesmo layout das pastas; oculto durante busca */}
+        {!searchQuery.trim() && trendingImages.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-xl font-bold mb-4 text-gray-900">TENDÊNCIAS</h2>
+            <div className="relative">
+              <div className="overflow-x-auto pb-4">
+                <div className="inline-flex gap-3 min-w-full">
+                  {trendingImages.map((image) => {
+                    const selectionCount = selectedCounts[image.code] ?? 0
+                    const isSelected = selectionCount > 0
+                    const isDisabled = !isSelected && selectedImages.length >= (customerData?.quantity ?? 0)
+                    return (
+                      <Card
+                        key={image.id}
+                        className={`relative transition-all flex-shrink-0 w-[200px] ${
+                          isSelected ? "ring-2 ring-indigo-500" : ""
+                        } ${!customerData ? "cursor-default" : isDisabled ? "opacity-50" : "cursor-pointer hover:shadow-md"}`}
+                        onClick={() => customerData && !isDisabled && handleImageSelect(image.code)}
+                      >
+                        <CardContent className="p-0">
+                          <div className="relative aspect-square">
+                            <img
+                              src={image.image_url}
+                              alt={image.code}
+                              className="object-cover w-full h-full"
+                              onContextMenu={(e) => e.preventDefault()}
+                              draggable="false"
+                              style={{ userSelect: "none" }}
+                            />
+                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                              <img src="/logo.png" alt="Logo" className="w-24 opacity-40" />
+                            </div>
+                            {isSelected && (
+                              <div className="absolute inset-0 bg-indigo-500 bg-opacity-25 flex flex-col items-center justify-center gap-2">
+                                <Check className="w-8 h-8 text-indigo-600" />
+                                <div
+                                  className="pointer-events-auto flex items-center rounded-xl border bg-white px-1 py-1 shadow-sm"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <button
+                                    onClick={() => handleQuantityChange(image.code, -1)}
+                                    className="flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-gray-700 hover:bg-gray-100"
+                                    aria-label={`Diminuir quantidade de ${image.code}`}
+                                  >
+                                    <Minus className="h-4 w-4" />
+                                  </button>
+                                  <span className="min-w-8 px-2 text-center text-sm font-semibold text-gray-800">{selectionCount}</span>
+                                  <button
+                                    onClick={() => handleQuantityChange(image.code, 1)}
+                                    disabled={selectedImages.length >= (customerData?.quantity ?? 0)}
+                                    className="flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                    aria-label={`Aumentar quantidade de ${image.code}`}
+                                  >
+                                    <Plus className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          <div className="p-2 text-center">
+                            <p className="text-sm font-medium">{image.code}</p>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {filteredCategories.length === 0 ? (
+          <div className="text-center py-12">
+            <p className="text-gray-500">
+              {searchQuery ? "Nenhum resultado encontrado para sua busca." : "Nenhum tema encontrado."}
+            </p>
+          </div>
+        ) : (
+          filteredCategories.map((category) => {
+            const categoryImages = getImagesByCategory(category.id)
+            if (categoryImages.length === 0) return null
+
+            return (
+              <div key={category.id} className="mb-8">
+                <h2 className="text-xl font-bold mb-4 text-gray-900">{category.name}</h2>
+
+                <div className="relative">
+                  <div className="overflow-x-auto pb-4">
+                    <div className="inline-flex gap-3 min-w-full">
+                      {categoryImages.map((image) => {
+                        const selectionCount = selectedCounts[image.code] ?? 0
+                        const isSelected = selectionCount > 0
+                        const isDisabled = !isSelected && selectedImages.length >= (customerData?.quantity ?? 0)
+
+                        return (
+                          <Card
+                            key={image.id}
+                            className={`relative transition-all flex-shrink-0 w-[200px] ${
+                              isSelected ? "ring-2 ring-indigo-500" : ""
+                            } ${!customerData ? "cursor-default" : isDisabled ? "opacity-50" : "cursor-pointer hover:shadow-md"}`}
+                            onClick={() => customerData && !isDisabled && handleImageSelect(image.code)}
+                          >
+                            <CardContent className="p-0">
+                              <div className="relative aspect-square">
+                                <img
+                                  src={image.image_url}
+                                  alt={image.code}
+                                  className="object-cover w-full h-full"
+                                  onContextMenu={(e) => e.preventDefault()}
+                                  draggable="false"
+                                  style={{ userSelect: 'none' }}
+                                />
+                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                  <img 
+                                    src="/logo.png" 
+                                    alt="Logo" 
+                                    className="w-24 opacity-40"
+                                  />
+                                </div>
+                                {isSelected && (
+                                  <div className="absolute inset-0 bg-indigo-500 bg-opacity-25 flex flex-col items-center justify-center gap-2">
+                                    <Check className="w-8 h-8 text-indigo-600" />
+                                    <div
+                                      className="pointer-events-auto flex items-center rounded-xl border bg-white px-1 py-1 shadow-sm"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <button
+                                        onClick={() => handleQuantityChange(image.code, -1)}
+                                        className="flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-gray-700 hover:bg-gray-100"
+                                        aria-label={`Diminuir quantidade de ${image.code}`}
+                                      >
+                                        <Minus className="h-4 w-4" />
+                                      </button>
+                                      <span className="min-w-8 px-2 text-center text-sm font-semibold text-gray-800">{selectionCount}</span>
+                                      <button
+                                        onClick={() => handleQuantityChange(image.code, 1)}
+                                        disabled={selectedImages.length >= (customerData?.quantity ?? 0)}
+                                        className="flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                        aria-label={`Aumentar quantidade de ${image.code}`}
+                                      >
+                                        <Plus className="h-4 w-4" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="p-2 text-center">
+                                <p className="text-sm font-medium">{image.code}</p>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
+          })
+        )}
+
+        {loadingMore && (
+          <div className="text-center py-4">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto"></div>
+            <p className="text-sm text-gray-500 mt-2">Carregando mais imagens...</p>
+          </div>
+        )}
+
+        {/* Modal de confirmação de aumento de quantidade */}
+        <Dialog
+          open={isIncreaseConfirmOpen}
+          onOpenChange={(open) => {
+            if (open) setIsIncreaseConfirmOpen(true)
+          }}
+        >
+          <DialogContent
+            className="w-[95vw] max-w-2xl p-6 [&>button]:hidden"
+            onInteractOutside={(event) => event.preventDefault()}
+            onEscapeKeyDown={(event) => event.preventDefault()}
+          >
+            <div className="flex flex-col items-center text-center gap-5">
+              <AlertTriangle className="w-16 h-16 text-yellow-500" />
+
+              <p className="text-base sm:text-lg font-semibold">
+                ATENCAO, VOCE ESTA SELECIONANDO{" "}
+                <strong>{pendingIncrease?.nextQty ?? 0} UNIDADES</strong> DO MESMO ITEM.
+              </p>
+
+              <div className="flex flex-wrap justify-center gap-3">
+                {pendingIncrease &&
+                  Array.from({ length: pendingIncrease.nextQty }, (_, index) => (
+                    <div key={`${pendingIncrease.imageCode}-${index}`} className="w-20 h-20 rounded-md overflow-hidden border bg-gray-100 relative">
+                      {increasePreviewImageUrl ? (
+                        <img
+                          src={increasePreviewImageUrl}
+                          alt={pendingIncrease.imageCode}
+                          className="w-full h-full object-cover"
+                          onContextMenu={(e) => e.preventDefault()}
+                          draggable={false}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-[11px] font-medium text-gray-600 px-1">
+                          {pendingIncrease.imageCode}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+              </div>
+
+              <p className="text-sm sm:text-base font-medium">
+                SE TIVER CERTEZA, CLIQUE PARA CONFIRMAR.
+              </p>
+
+              <div className="flex items-center justify-center gap-2">
+                <Button type="button" variant="outline" onClick={handleCancelIncrease}>
+                  CANCELAR
+                </Button>
+                <Button type="button" onClick={handleConfirmIncrease}>
+                  CONFIRMAR
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Modal de Confirmação */}
+        <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+          <DialogContent className="w-[95vw] sm:w-auto sm:max-w-lg md:max-w-2xl lg:max-w-3xl xl:max-w-4xl max-w-full overflow-hidden p-0">
+            <div className="flex flex-col max-h-[80vh] sm:max-h-[85vh]">
+              <DialogHeader className="px-4 pt-4 pb-2">
+                <div className="flex justify-center mb-3">
+                  <AlertTriangle className="w-10 h-10 sm:w-12 sm:h-12 text-yellow-500" />
+                </div>
+                <DialogTitle className="text-center text-lg sm:text-xl">Confirmar Pedido</DialogTitle>
+                <DialogDescription className="text-center text-sm sm:text-base">
+                  Você está prestes a confirmar seu pedido com {selectedImages.length} imagens selecionadas.
+                </DialogDescription>
+              </DialogHeader>
+
+              {/* ÁREA ROLÁVEL */}
+              <div className="flex-1 overflow-hidden px-4 pb-4 space-y-4">
+                <h4 className="text-sm font-medium text-gray-700 text-center">
+                  Imagens Selecionadas ({selectedImages.length}/{customerData?.quantity})
+                </h4>
+                {/* MINIATURAS (GRID COM ROLAGEM VERTICAL) */}
+                <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3 max-h-[50vh] overflow-y-auto px-4 pt-4 pb-32">
+                  {selectedItems.map(({ code: imageCode, quantity }) => {
+                    const cached = imagesCache[imageCode]
+                    const url = cached?.image_url
+                    return (
+                      <div key={imageCode} className="relative">
+                        <div className="w-full aspect-square rounded-lg overflow-hidden border-2 border-gray-200 relative bg-gray-100">
+                          {url ? (
+                            <img
+                              src={url}
+                              alt={imageCode}
+                              className="w-full h-full object-cover select-none"
+                              onContextMenu={(e) => e.preventDefault()}
+                              draggable={false}
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-500 p-2 text-center text-xs">
+                              {imageCode}
+                            </div>
+                          )}
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <img src="/logo.png" alt="Logo" className="w-10 sm:w-12 opacity-40" />
+                          </div>
+                          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-blue-600 px-2 py-0.5 text-xs font-semibold text-white shadow">
+                            {quantity}x
+                          </div>
+                        </div>
+
+                        {/* Botão de remover não ultrapassa o card */}
+                        <button
+                          onClick={() => handleRemoveFromSelection(imageCode)}
+                          className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center transition-colors shadow-md"
+                          title="Remover imagem"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+
+                        <p className="text-[11px] sm:text-xs text-center mt-1 font-medium text-gray-600 truncate" title={imageCode}>{imageCode}</p>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* FOOTER FIXO */}
+              <div className="sticky bottom-0 w-full bg-white border-t p-3 sm:p-4">
+                {isSelectionComplete ? (
+                  <div className="flex items-start sm:items-center gap-3 px-1 sm:px-2 mb-2">
+                    <Checkbox
+                      id="aware"
+                      checked={isAware}
+                      onCheckedChange={(checked) => setIsAware(checked as boolean)}
+                    />
+                    <label htmlFor="aware" className="text-sm sm:text-base font-medium leading-snug sm:leading-none">
+                      Estou ciente que <strong>NÃO PODEREI ALTERAR</strong> os itens selecionados após a confirmação
+                    </label>
+                  </div>
+                ) : (
+                  <p className="mb-2 px-1 text-sm sm:text-base font-medium">
+                    Você precisa selecionar mais <strong>{missingCount} ITENS</strong> para confirmar o pedido.
+                  </p>
+                )}
+                <Button
+                  onClick={handleConfirmOrder}
+                  disabled={!isAware || loading || !isSelectionComplete}
+                  className="w-full"
+                >
+                  {loading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      Processando...
+                    </>
+                  ) : (
+                    "Confirmar Pedido"
+                  )}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+
+        {/* Botão de WhatsApp */}
+        {customerData && selectedImages.length > 0 && (
+          <div className="fixed bottom-4 left-0 right-0 flex justify-center">
+            <Button
+              size="lg"
+              className="shadow-lg"
+              onClick={() => setShowConfirmDialog(true)}
+              disabled={!isSelectionComplete || loading}
+            >
+              <Check className="w-5 h-5 mr-2" />
+              {isSelectionComplete ? "Confirmar Pedido" : "Selecione mais imagens"}
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

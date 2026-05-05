@@ -2,9 +2,10 @@
  * Constrói a URL pública que o cliente recebe para entrar em modo de pedido.
  *
  * Mantém o formato histórico `/?nome=X&pedido=Y&quantidade=Z` para preservar
- * compatibilidade com mensagens já enviadas. A raiz `/` faz a validação contra
- * `order_links` e redireciona para `/catalog`, `/confirmed/{Y}` ou exibe a tela
- * "URL Inválida".
+ * compatibilidade com mensagens já enviadas. Hoje a raiz `/` apenas detecta a
+ * presença dos params e redireciona para `/fazer-pedido?...`, que é quem faz a
+ * validação contra `order_links` e decide entre renderizar o catálogo (modo
+ * pedido), `/confirmed/{Y}` ou a tela "URL Inválida".
  *
  * Sempre usa apenas o `origin` (protocolo + host) da base, descartando qualquer
  * pathname (ex.: `/catalogointerativo`) — o app é servido na raiz do domínio
