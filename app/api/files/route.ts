@@ -702,12 +702,25 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: "Pasta não encontrada" }, { status: 404 })
         }
 
+        // O header HTTP x-amz-copy-source exige que bucket + key estejam URL-encoded.
+        // Caracteres como espaços, acentos e símbolos quebram o header com
+        // "Invalid character in header content" se enviados crus.
+        const encodeCopySource = (bucket: string, key: string) => {
+          const encodedKey = key.split("/").map(encodeURIComponent).join("/")
+          return `${bucket}/${encodedKey}`
+        }
+
         for (const oldKey of allOldKeys) {
-          const newKey = oldKey.replace(oldPrefix, newPrefix)
+          const newKey = oldKey.startsWith(oldPrefix)
+            ? `${newPrefix}${oldKey.slice(oldPrefix.length)}`
+            : oldKey.replace(oldPrefix, newPrefix)
+
+          if (newKey === oldKey) continue
+
           await s3Client.send(
             new CopyObjectCommand({
               Bucket: bucketName,
-              CopySource: `${bucketName}/${oldKey}`,
+              CopySource: encodeCopySource(bucketName, oldKey),
               Key: newKey,
             })
           )
