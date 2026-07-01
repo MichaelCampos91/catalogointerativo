@@ -4,7 +4,7 @@ import { ProtectedRoute, useAuth } from "@/lib/auth-context"
 import { useRouter, usePathname } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { LogOut, BarChart3, History, FolderOpen, Link2 } from "lucide-react"
+import { LogOut, BarChart3, History, FolderOpen, Link2, Megaphone } from "lucide-react"
 
 export default function AdminLayout({
   children,
@@ -93,6 +93,15 @@ export default function AdminLayout({
                 >
                   <FolderOpen className="h-4 w-4 mr-2" />
                   Arquivos
+                </Button>
+              </Link>
+              <Link href="/admin/promo-modal">
+                <Button
+                  variant="ghost"
+                  className={navLinkClass(isActive("/admin/promo-modal"))}
+                >
+                  <Megaphone className="h-4 w-4 mr-2" />
+                  Modal Promocional
                 </Button>
               </Link>
             </div>

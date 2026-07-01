@@ -1376,3 +1376,325 @@ export async function createOrderWithLinkConfirmation(
   }
 }
 
+// --- Modal Promocional ---
+
+export type PromoModal = {
+  id: string
+  name: string
+  title_html: string
+  description_html: string
+  title_align: string
+  title_color: string
+  title_size: string
+  title_bold: boolean
+  desc_align: string
+  desc_color: string
+  desc_size: string
+  desc_bold: boolean
+  background_color: string
+  button_text: string
+  button_url: string
+  button_bg_color: string
+  button_text_color: string
+  open_delay_seconds: number
+  max_displays: number
+  active: boolean
+  click_count: number
+  created_at: string
+  updated_at: string
+}
+
+export type PromoModalInput = {
+  name: string
+  title_html: string
+  description_html: string
+  title_align: string
+  title_color: string
+  title_size: string
+  title_bold: boolean
+  desc_align: string
+  desc_color: string
+  desc_size: string
+  desc_bold: boolean
+  background_color: string
+  button_text: string
+  button_url: string
+  button_bg_color: string
+  button_text_color: string
+  open_delay_seconds: number
+  max_displays: number
+}
+
+const PROMO_MODAL_COLUMNS = `
+  id, name, title_html, description_html,
+  title_align, title_color, title_size, title_bold,
+  desc_align, desc_color, desc_size, desc_bold,
+  background_color, button_text, button_url, button_bg_color, button_text_color,
+  open_delay_seconds, max_displays, active, click_count, created_at, updated_at
+`
+
+/**
+ * Garante a existência da tabela promo_modals e do índice único parcial que
+ * assegura no máximo um modal ativo por vez. Idempotente; chamada defensiva nas
+ * rotas para não depender exclusivamente de /api/init-db.
+ */
+export async function ensurePromoModalTable(): Promise<void> {
+  let client
+  try {
+    client = await pool.connect()
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS promo_modals (
+        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+        name TEXT NOT NULL DEFAULT '',
+        title_html TEXT NOT NULL DEFAULT '',
+        description_html TEXT NOT NULL DEFAULT '',
+        title_align TEXT NOT NULL DEFAULT 'center',
+        title_color TEXT NOT NULL DEFAULT '#111827',
+        title_size TEXT NOT NULL DEFAULT '24',
+        title_bold BOOLEAN NOT NULL DEFAULT true,
+        desc_align TEXT NOT NULL DEFAULT 'center',
+        desc_color TEXT NOT NULL DEFAULT '#374151',
+        desc_size TEXT NOT NULL DEFAULT '16',
+        desc_bold BOOLEAN NOT NULL DEFAULT false,
+        background_color TEXT NOT NULL DEFAULT '#ffffff',
+        button_text TEXT NOT NULL DEFAULT '',
+        button_url TEXT NOT NULL DEFAULT '',
+        button_bg_color TEXT NOT NULL DEFAULT '#4f46e5',
+        button_text_color TEXT NOT NULL DEFAULT '#ffffff',
+        open_delay_seconds INTEGER NOT NULL DEFAULT 3,
+        max_displays INTEGER NOT NULL DEFAULT 1,
+        active BOOLEAN NOT NULL DEFAULT false,
+        click_count INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `)
+    await client.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_promo_modals_single_active
+       ON promo_modals(active) WHERE active = true;`
+    )
+  } catch (error) {
+    console.error("Erro ao garantir tabela promo_modals:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function listPromoModals(): Promise<PromoModal[]> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `SELECT ${PROMO_MODAL_COLUMNS} FROM promo_modals ORDER BY created_at DESC`
+    )
+    return result.rows as PromoModal[]
+  } catch (error) {
+    console.error("Erro ao listar modais promocionais:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function getPromoModalById(id: string): Promise<PromoModal | null> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `SELECT ${PROMO_MODAL_COLUMNS} FROM promo_modals WHERE id = $1`,
+      [id]
+    )
+    return (result.rows[0] ?? null) as PromoModal | null
+  } catch (error) {
+    console.error("Erro ao buscar modal promocional:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function getActivePromoModal(): Promise<PromoModal | null> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `SELECT ${PROMO_MODAL_COLUMNS} FROM promo_modals WHERE active = true LIMIT 1`
+    )
+    return (result.rows[0] ?? null) as PromoModal | null
+  } catch (error) {
+    console.error("Erro ao buscar modal promocional ativo:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function createPromoModal(input: PromoModalInput): Promise<PromoModal> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `INSERT INTO promo_modals
+         (name, title_html, description_html,
+          title_align, title_color, title_size, title_bold,
+          desc_align, desc_color, desc_size, desc_bold,
+          background_color, button_text, button_url, button_bg_color, button_text_color,
+          open_delay_seconds, max_displays)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+       RETURNING ${PROMO_MODAL_COLUMNS}`,
+      [
+        input.name,
+        input.title_html,
+        input.description_html,
+        input.title_align,
+        input.title_color,
+        input.title_size,
+        input.title_bold,
+        input.desc_align,
+        input.desc_color,
+        input.desc_size,
+        input.desc_bold,
+        input.background_color,
+        input.button_text,
+        input.button_url,
+        input.button_bg_color,
+        input.button_text_color,
+        input.open_delay_seconds,
+        input.max_displays,
+      ]
+    )
+    return result.rows[0] as PromoModal
+  } catch (error) {
+    console.error("Erro ao criar modal promocional:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function updatePromoModal(id: string, input: PromoModalInput): Promise<PromoModal> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `UPDATE promo_modals SET
+         name = $2, title_html = $3, description_html = $4,
+         title_align = $5, title_color = $6, title_size = $7, title_bold = $8,
+         desc_align = $9, desc_color = $10, desc_size = $11, desc_bold = $12,
+         background_color = $13, button_text = $14, button_url = $15,
+         button_bg_color = $16, button_text_color = $17,
+         open_delay_seconds = $18, max_displays = $19, updated_at = NOW()
+       WHERE id = $1
+       RETURNING ${PROMO_MODAL_COLUMNS}`,
+      [
+        id,
+        input.name,
+        input.title_html,
+        input.description_html,
+        input.title_align,
+        input.title_color,
+        input.title_size,
+        input.title_bold,
+        input.desc_align,
+        input.desc_color,
+        input.desc_size,
+        input.desc_bold,
+        input.background_color,
+        input.button_text,
+        input.button_url,
+        input.button_bg_color,
+        input.button_text_color,
+        input.open_delay_seconds,
+        input.max_displays,
+      ]
+    )
+    if (result.rows.length === 0) {
+      throw new Error("Modal não encontrado")
+    }
+    return result.rows[0] as PromoModal
+  } catch (error) {
+    console.error("Erro ao atualizar modal promocional:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+/**
+ * Ativa/inativa um modal. Ao ativar, desativa todos os demais na mesma
+ * transação para garantir no máximo um modal ativo por vez.
+ */
+export async function setPromoModalActive(id: string, active: boolean): Promise<PromoModal> {
+  let client
+  try {
+    client = await pool.connect()
+    await client.query("BEGIN")
+
+    if (active) {
+      await client.query(
+        `UPDATE promo_modals SET active = false, updated_at = NOW()
+         WHERE active = true AND id <> $1`,
+        [id]
+      )
+    }
+
+    const result = await client.query(
+      `UPDATE promo_modals SET active = $2, updated_at = NOW()
+       WHERE id = $1
+       RETURNING ${PROMO_MODAL_COLUMNS}`,
+      [id, active]
+    )
+    if (result.rows.length === 0) {
+      throw new Error("Modal não encontrado")
+    }
+
+    await client.query("COMMIT")
+    return result.rows[0] as PromoModal
+  } catch (error) {
+    if (client) {
+      try {
+        await client.query("ROLLBACK")
+      } catch (rollbackError) {
+        console.error("Erro ao executar ROLLBACK em setPromoModalActive:", rollbackError)
+      }
+    }
+    console.error("Erro ao alterar status do modal promocional:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function deletePromoModal(id: string): Promise<void> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(`DELETE FROM promo_modals WHERE id = $1`, [id])
+    if (result.rowCount === 0) {
+      throw new Error("Modal não encontrado")
+    }
+  } catch (error) {
+    console.error("Erro ao excluir modal promocional:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function incrementPromoModalClick(id: string): Promise<void> {
+  let client
+  try {
+    client = await pool.connect()
+    await client.query(
+      `UPDATE promo_modals SET click_count = click_count + 1 WHERE id = $1`,
+      [id]
+    )
+  } catch (error) {
+    console.error("Erro ao incrementar cliques do modal promocional:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+

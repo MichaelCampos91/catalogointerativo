@@ -7,6 +7,7 @@ import { Calendar, User, Package, CheckCircle, ListOrdered, AlertCircle } from "
 import { useRouter, useParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { resolveImageUrls, PLACEHOLDER_IMAGE_URL } from "@/lib/image-urls"
+import { PromoModal } from "@/components/PromoModal"
 
 type Order = {
   id: string
@@ -130,6 +131,7 @@ export default function ConfirmedPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <PromoModal />
       <div className="max-w-4xl mx-auto p-4">
         {/* Banner de pedido já confirmado (só em revisitas) */}
         {showAlreadyConfirmedBanner && (

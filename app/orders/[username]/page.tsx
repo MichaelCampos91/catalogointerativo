@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { ArrowLeft, Eye, Package, AlertCircle } from "lucide-react"
 import { resolveImageUrls, PLACEHOLDER_IMAGE_URL } from "@/lib/image-urls"
+import { PromoModal } from "@/components/PromoModal"
 
 type CustomerOrder = {
   id: string
@@ -97,6 +98,7 @@ export default function CustomerOrdersPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <PromoModal />
       <div className="max-w-4xl mx-auto p-4">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">

@@ -165,6 +165,40 @@ export async function POST() {
     )
     console.log("API: Tabela app_settings criada/verificada (com seed default_link_message)")
 
+    // Tabela promo_modals: modal promocional exibido nas páginas /confirmed e /orders
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS promo_modals (
+        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+        name TEXT NOT NULL DEFAULT '',
+        title_html TEXT NOT NULL DEFAULT '',
+        description_html TEXT NOT NULL DEFAULT '',
+        title_align TEXT NOT NULL DEFAULT 'center',
+        title_color TEXT NOT NULL DEFAULT '#111827',
+        title_size TEXT NOT NULL DEFAULT '24',
+        title_bold BOOLEAN NOT NULL DEFAULT true,
+        desc_align TEXT NOT NULL DEFAULT 'center',
+        desc_color TEXT NOT NULL DEFAULT '#374151',
+        desc_size TEXT NOT NULL DEFAULT '16',
+        desc_bold BOOLEAN NOT NULL DEFAULT false,
+        background_color TEXT NOT NULL DEFAULT '#ffffff',
+        button_text TEXT NOT NULL DEFAULT '',
+        button_url TEXT NOT NULL DEFAULT '',
+        button_bg_color TEXT NOT NULL DEFAULT '#4f46e5',
+        button_text_color TEXT NOT NULL DEFAULT '#ffffff',
+        open_delay_seconds INTEGER NOT NULL DEFAULT 3,
+        max_displays INTEGER NOT NULL DEFAULT 1,
+        active BOOLEAN NOT NULL DEFAULT false,
+        click_count INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `)
+    await client.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_promo_modals_single_active
+       ON promo_modals(active) WHERE active = true;`
+    )
+    console.log("API: Tabela promo_modals criada/verificada")
+
     // Inserir dados de exemplo apenas se não existirem
     const categoriesCount = await client.query("SELECT COUNT(*) FROM categories")
     if (Number.parseInt(categoriesCount.rows[0].count) === 0) {
