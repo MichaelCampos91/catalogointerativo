@@ -5,10 +5,12 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { Unlink } from "lucide-react"
 import CatalogView from "@/components/catalog/CatalogView"
+import { ExpiredLinkScreen } from "@/components/ExpiredLinkScreen"
 
 type ValidationState =
   | { status: "loading" }
   | { status: "allowed" }
+  | { status: "expired"; message?: string }
   | { status: "invalid"; reason?: string }
 
 /**
@@ -18,9 +20,10 @@ type ValidationState =
  * Fluxo (preserva o que antes vivia em `app/page.tsx`):
  *  - Sem params válidos: volta para a landing (`/`).
  *  - Com params: consulta `POST /api/order-links/validate`.
- *    - `allowed`   → grava `customerData`, limpa carrinho de outro pedido se
- *                    houver, e renderiza o `CatalogView` em modo pedido.
+ *    - `allowed`   → grava `customerData` (com expiresAt), limpa carrinho de
+ *                    outro pedido se houver, e renderiza o `CatalogView`.
  *    - `confirmed` → redireciona para `/confirmed/{pedido}`.
+ *    - `expired`   → tela "Link Expirado" com a mensagem configurada.
  *    - `invalid`   → renderiza inline a tela "URL Inválida".
  */
 function FazerPedidoInner() {
@@ -59,10 +62,16 @@ function FazerPedidoInner() {
 
         if (data.result === "allowed") {
           // Persistência por pedido (carrinho permanece entre acessos do mesmo link).
+          // expiresAt vem do servidor (snapshot); null = sem expiração.
+          const expiresAt =
+            typeof data.expiresAt === "string" && data.expiresAt
+              ? data.expiresAt
+              : null
           const customerData = {
             name,
             orderNumber,
             quantity,
+            expiresAt,
             timestamp: new Date().toISOString(),
           }
           try {
@@ -88,6 +97,22 @@ function FazerPedidoInner() {
           return
         }
 
+        if (data.result === "expired") {
+          try {
+            localStorage.removeItem("customerData")
+            localStorage.removeItem("sessionLocked")
+            localStorage.removeItem(`selectedImages:${orderNumber}`)
+            localStorage.removeItem(`catalogTimer:${orderNumber}`)
+          } catch {
+            // localStorage indisponível
+          }
+          setState({
+            status: "expired",
+            message: typeof data.message === "string" ? data.message : undefined,
+          })
+          return
+        }
+
         setState({ status: "invalid", reason: data.reason })
       } catch (error) {
         console.error("Erro ao validar link:", error)
@@ -102,6 +127,10 @@ function FazerPedidoInner() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
+
+  if (state.status === "expired") {
+    return <ExpiredLinkScreen message={state.message} />
+  }
 
   if (state.status === "invalid") {
     return (

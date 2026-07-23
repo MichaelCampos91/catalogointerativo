@@ -16,12 +16,23 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { toast } from "sonner"
+import { ExpiredLinkScreen } from "@/components/ExpiredLinkScreen"
 
 type Category = {
   id: string
   name: string
   slug: string
 }
+
+type CustomerData = {
+  name: string
+  quantity: number
+  orderNumber: string
+  /** ISO do prazo snapshot do link; null/undefined = sem expiração. */
+  expiresAt?: string | null
+}
+
+const WARNING_THRESHOLD_SECONDS = 2 * 60 * 60 // barra vermelha quando faltam < 2h
 
 type CatalogImage = {
   id: string
@@ -60,7 +71,7 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
   const [categories, setCategories] = useState<Category[]>([])
   const [images, setImages] = useState<CatalogImage[]>([])
   const [selectedImages, setSelectedImages] = useState<string[]>([])
-  const [customerData, setCustomerData] = useState<{ name: string; quantity: number; orderNumber: string } | null>(null)
+  const [customerData, setCustomerData] = useState<CustomerData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
@@ -79,11 +90,15 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
     totalPages: 1
   })
   const [loadingMore, setLoadingMore] = useState(false)
-  const [timeLeft, setTimeLeft] = useState<number>(24 * 60 * 60) // 24 horas em segundos
+  /** Segundos restantes até expiresAt; null = sem expiração configurada. */
+  const [timeLeft, setTimeLeft] = useState<number | null>(null)
+  const [expiredMessage, setExpiredMessage] = useState<string | null>(null)
+  const [linkExpired, setLinkExpired] = useState(false)
   const [imagesCache, setImagesCache] = useState<Record<string, { code: string; image_url: string; category_id: string }>>({})
   const [trendingImages, setTrendingImages] = useState<CatalogImage[]>([])
   const router = useRouter()
   const pathname = usePathname()
+  const expiredHandledRef = useRef(false)
   const selectedCounts = useMemo(
     () =>
       selectedImages.reduce<Record<string, number>>((acc, code) => {
@@ -183,9 +198,9 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
     // mesmo um cliente com pedido em andamento vê apenas a visualização.
     if (mode === "order") {
       const data = localStorage.getItem("customerData")
-      let parsed: { name: string; orderNumber: string; quantity: number } | null = null
+      let parsed: CustomerData | null = null
       if (data) {
-        parsed = JSON.parse(data)
+        parsed = JSON.parse(data) as CustomerData
         setCustomerData(parsed)
         // Limpar caches de pedidos diferentes e carregar cache do pedido atual
         const currentCacheKey = `imageCache:${parsed!.orderNumber}`
@@ -232,28 +247,25 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
         localStorage.removeItem("selectedImages")
       }
 
-      // Inicializar o cronômetro apenas se houver dados do cliente.
-      // Chaveado por orderNumber para preservar entre acessos do mesmo link.
+      // Cronômetro real a partir de expiresAt (snapshot do servidor).
+      // Remove o timer "fake" legado (catalogTimer) — não é mais usado.
       if (parsed?.orderNumber) {
-        const timerKey = `catalogTimer:${parsed.orderNumber}`
-        let savedTime = localStorage.getItem(timerKey)
-        // Migração suave do timer global legado para o keyado por pedido.
-        if (!savedTime) {
-          const legacy = localStorage.getItem("catalogTimer")
-          if (legacy) {
-            savedTime = legacy
-            localStorage.setItem(timerKey, legacy)
-          }
+        try {
+          localStorage.removeItem(`catalogTimer:${parsed.orderNumber}`)
           localStorage.removeItem("catalogTimer")
+        } catch {
+          // localStorage indisponível
         }
-        if (savedTime) {
-          const endTime = parseInt(savedTime)
-          const now = Math.floor(Date.now() / 1000)
-          const remaining = Math.max(0, endTime - now)
-          setTimeLeft(remaining)
+        if (parsed.expiresAt) {
+          const expiresMs = new Date(parsed.expiresAt).getTime()
+          if (Number.isFinite(expiresMs)) {
+            const remaining = Math.max(0, Math.floor((expiresMs - Date.now()) / 1000))
+            setTimeLeft(remaining)
+          } else {
+            setTimeLeft(null)
+          }
         } else {
-          const endTime = Math.floor(Date.now() / 1000) + (2 * 60 * 60)
-          localStorage.setItem(timerKey, endTime.toString())
+          setTimeLeft(null)
         }
       }
     }
@@ -282,6 +294,31 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const clearOrderSession = (orderNumber: string) => {
+    try {
+      localStorage.removeItem("customerData")
+      localStorage.removeItem("sessionLocked")
+      localStorage.removeItem(`selectedImages:${orderNumber}`)
+      localStorage.removeItem(`catalogTimer:${orderNumber}`)
+      localStorage.removeItem(`imageCache:${orderNumber}`)
+    } catch {
+      // localStorage indisponível
+    }
+  }
+
+  const handleLinkExpired = (message?: string) => {
+    if (expiredHandledRef.current) return
+    expiredHandledRef.current = true
+    if (customerData?.orderNumber) {
+      clearOrderSession(customerData.orderNumber)
+    }
+    setExpiredMessage(typeof message === "string" ? message : null)
+    setLinkExpired(true)
+    setShowConfirmDialog(false)
+    setCustomerData(null)
+    setTimeLeft(0)
+  }
+
   // Validação em background: garante que somente links válidos/pendentes acessem o modo pedido.
   // Naturalmente desligado em modo `view` (customerData fica null).
   useEffect(() => {
@@ -303,17 +340,28 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
         if (data.result === "confirmed") {
           // Link já confirmado (ou pedido legado): redireciona para /confirmed.
           router.replace(`/confirmed/${encodeURIComponent(customerData.orderNumber)}`)
+        } else if (data.result === "expired") {
+          handleLinkExpired(typeof data.message === "string" ? data.message : undefined)
         } else if (data.result === "invalid") {
           // Link inválido / dados manipulados: limpa sessão e volta à raiz.
-          try {
-            localStorage.removeItem("customerData")
-            localStorage.removeItem("sessionLocked")
-            localStorage.removeItem(`selectedImages:${customerData.orderNumber}`)
-            localStorage.removeItem(`catalogTimer:${customerData.orderNumber}`)
-          } catch {
-            // localStorage indisponível
-          }
+          clearOrderSession(customerData.orderNumber)
           router.replace("/")
+        } else if (data.result === "allowed" && typeof data.expiresAt === "string" && data.expiresAt) {
+          // Sincroniza expiresAt caso o localStorage esteja desatualizado.
+          const expiresMs = new Date(data.expiresAt).getTime()
+          if (Number.isFinite(expiresMs)) {
+            const remaining = Math.max(0, Math.floor((expiresMs - Date.now()) / 1000))
+            setTimeLeft(remaining)
+            if (customerData.expiresAt !== data.expiresAt) {
+              const updated = { ...customerData, expiresAt: data.expiresAt }
+              setCustomerData(updated)
+              try {
+                localStorage.setItem("customerData", JSON.stringify(updated))
+              } catch {
+                // ignora
+              }
+            }
+          }
         }
       } catch (error) {
         // Falha de rede: mantém o modo atual (UX mais tolerante; servidor revalida na confirmação).
@@ -326,20 +374,57 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customerData?.orderNumber])
 
-  // Efeito para atualizar o cronômetro
+  // Cronômetro regressivo real a partir de expiresAt.
   useEffect(() => {
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 0) {
-          clearInterval(timer)
-          return 0
-        }
-        return prev - 1
-      })
-    }, 1000)
+    if (!customerData?.expiresAt) return
 
+    const tick = () => {
+      const expiresMs = new Date(customerData.expiresAt!).getTime()
+      if (!Number.isFinite(expiresMs)) {
+        setTimeLeft(null)
+        return
+      }
+      const remaining = Math.max(0, Math.floor((expiresMs - Date.now()) / 1000))
+      setTimeLeft(remaining)
+    }
+
+    tick()
+    const timer = setInterval(tick, 1000)
     return () => clearInterval(timer)
-  }, [])
+  }, [customerData?.expiresAt, customerData?.orderNumber])
+
+  // Ao zerar o cronômetro, revalida no servidor e bloqueia o acesso.
+  useEffect(() => {
+    if (timeLeft !== 0 || !customerData || linkExpired || expiredHandledRef.current) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch("/api/order-links/validate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: customerData.name,
+            orderNumber: customerData.orderNumber,
+            quantity: customerData.quantity,
+          }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (cancelled) return
+        if (data.result === "expired" || data.result === "invalid") {
+          handleLinkExpired(typeof data.message === "string" ? data.message : undefined)
+        } else if (data.result === "confirmed") {
+          router.replace(`/confirmed/${encodeURIComponent(customerData.orderNumber)}`)
+        }
+      } catch {
+        // Em falha de rede, bloqueia localmente com mensagem padrão.
+        handleLinkExpired()
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeLeft, customerData?.orderNumber])
 
   // Efeito para salvar itens selecionados no localStorage (chave por orderNumber)
   useEffect(() => {
@@ -418,11 +503,15 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showConfirmDialog])
 
-  // Função para formatar o tempo restante
+  // Função para formatar o tempo restante (HH:MM:SS quando < 1h, senão HH:MM)
   const formatTimeLeft = (seconds: number) => {
     const hours = Math.floor(seconds / 3600)
     const minutes = Math.floor((seconds % 3600) / 60)
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`
+    const secs = seconds % 60
+    if (hours > 0) {
+      return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
+    }
+    return `${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
   }
 
   // Função para carregar dados do catálogo
@@ -650,6 +739,10 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
 
   const handleConfirmOrder = async () => {
     if (!customerData || !isAware) return
+    if (timeLeft !== null && timeLeft <= 0) {
+      handleLinkExpired()
+      return
+    }
 
     try {
       setLoading(true)
@@ -729,6 +822,10 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
     return categories
   }
 
+  if (linkExpired) {
+    return <ExpiredLinkScreen message={expiredMessage} />
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center overflow-hidden">
@@ -766,11 +863,21 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
   const isSelectionComplete = customerData ? selectedImages.length === customerData.quantity : false
   const missingCount = customerData ? Math.max(customerData.quantity - selectedImages.length, 0) : 0
   const filteredCategories = getFilteredCategories()
+  const showTimer = customerData && timeLeft !== null
+  const showUrgencyBar =
+    showTimer && timeLeft !== null && timeLeft > 0 && timeLeft < WARNING_THRESHOLD_SECONDS
 
   return (
     <div className="min-h-screen bg-gray-50 overflow-hidden">
       {/* Header fixo */}
       <div className="sticky top-0 bg-white border-b z-20">
+        {/* Barra de alerta: tempo acabando (< 2h) — fixa no topo, não cobre a grade */}
+        {showUrgencyBar && (
+          <div className="bg-red-600 text-white text-center text-sm font-medium px-3 py-2">
+            Atenção: o tempo para escolher os itens está acabando! Restam{" "}
+            <span className="font-bold">{formatTimeLeft(timeLeft!)}</span>.
+          </div>
+        )}
         <div className="max-w-4xl mx-auto">
           {/* Nav */}
           <div className="flex items-center justify-between p-4">
@@ -805,11 +912,21 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
             </div>
           </div>
 
-          {/* Cronômetro - apenas se houver dados do cliente */}
-          {customerData && (
+          {/* Cronômetro real — só quando o link tem expiresAt */}
+          {showTimer && (
             <div className="px-4 pb-4 text-center">
               <p className="text-sm text-gray-600">
-                Você tem <span className="font-bold text-indigo-600">{formatTimeLeft(timeLeft)} hrs</span> para finalizar a seleção.
+                {timeLeft === 0 ? (
+                  <>O prazo para finalizar a seleção <span className="font-bold text-red-600">expirou</span>.</>
+                ) : (
+                  <>
+                    Você tem{" "}
+                    <span className={`font-bold ${showUrgencyBar ? "text-red-600" : "text-indigo-600"}`}>
+                      {formatTimeLeft(timeLeft!)}
+                    </span>{" "}
+                    para finalizar a seleção.
+                  </>
+                )}
               </p>
             </div>
           )}
@@ -1133,7 +1250,7 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
                 )}
                 <Button
                   onClick={handleConfirmOrder}
-                  disabled={!isAware || loading || !isSelectionComplete}
+                  disabled={!isAware || loading || !isSelectionComplete || (timeLeft !== null && timeLeft <= 0)}
                   className="w-full"
                 >
                   {loading ? (
@@ -1158,7 +1275,7 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
               size="lg"
               className="shadow-lg"
               onClick={() => setShowConfirmDialog(true)}
-              disabled={!isSelectionComplete || loading}
+              disabled={!isSelectionComplete || loading || (timeLeft !== null && timeLeft <= 0)}
             >
               <Check className="w-5 h-5 mr-2" />
               {isSelectionComplete ? "Confirmar Pedido" : "Selecione mais imagens"}

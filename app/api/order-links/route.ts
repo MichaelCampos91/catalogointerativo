@@ -8,6 +8,7 @@ import {
 } from "@/lib/database"
 import { requireAuth, authErrorResponse } from "@/lib/auth"
 import { buildClientOrderLink } from "@/lib/order-links"
+import { getLinkExpirationSettings } from "@/lib/link-expiration"
 
 const VALID_STATUSES: OrderLinkStatus[] = ["pending", "confirmed", "cancelled"]
 
@@ -60,6 +61,11 @@ export async function POST(request: Request) {
       ? messageTemplate.replace(/{{\s*link(?:\s+gerado)?\s*}}/gi, generatedUrl)
       : null
 
+    // Snapshot do prazo: congela expires_at no momento do registro com o valor
+    // global vigente. Alterar/desativar o global afeta apenas links futuros.
+    const expiration = await getLinkExpirationSettings()
+    const durationMinutes = expiration.enabled ? expiration.minutes : null
+
     const link = await createOrderLink({
       customer_name: customerName,
       order_number: orderNumber,
@@ -67,6 +73,7 @@ export async function POST(request: Request) {
       message: finalMessage,
       message_template: messageTemplate,
       generated_url: generatedUrl,
+      durationMinutes,
     })
 
     return NextResponse.json({ link })

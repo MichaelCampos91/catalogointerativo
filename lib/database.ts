@@ -925,6 +925,7 @@ export type OrderLink = {
   created_at: string
   updated_at: string
   confirmed_at: string | null
+  expires_at: string | null
   order_id: string | null
 }
 
@@ -935,6 +936,8 @@ export type CreateOrderLink = {
   message: string | null
   message_template: string | null
   generated_url: string
+  /** Duração em minutos a partir de NOW() do banco. Null/undefined/<=0 = sem expiração. */
+  durationMinutes?: number | null
 }
 
 export async function createOrderLink(input: CreateOrderLink): Promise<OrderLink> {
@@ -963,10 +966,20 @@ export async function createOrderLink(input: CreateOrderLink): Promise<OrderLink
       throw new Error("Já existe um link registrado para este número de pedido")
     }
 
+    const durationMinutes =
+      typeof input.durationMinutes === "number" &&
+      Number.isInteger(input.durationMinutes) &&
+      input.durationMinutes > 0
+        ? input.durationMinutes
+        : null
+
     const result = await client.query(
       `INSERT INTO order_links
-         (customer_name, order_number, quantity, message, message_template, generated_url)
-       VALUES ($1, $2, $3, $4, $5, $6)
+         (customer_name, order_number, quantity, message, message_template, generated_url, expires_at)
+       VALUES (
+         $1, $2, $3, $4, $5, $6,
+         CASE WHEN $7::integer IS NOT NULL THEN NOW() + ($7::integer * INTERVAL '1 minute') ELSE NULL END
+       )
        RETURNING *`,
       [
         input.customer_name.trim(),
@@ -975,6 +988,7 @@ export async function createOrderLink(input: CreateOrderLink): Promise<OrderLink
         input.message,
         input.message_template,
         input.generated_url,
+        durationMinutes,
       ]
     )
     return result.rows[0] as OrderLink
@@ -1289,6 +1303,17 @@ export async function createOrderWithLinkConfirmation(
       }
       if (existingLink.status === "cancelled") {
         throw new Error("Este link foi cancelado e não pode ser utilizado")
+      }
+      // Bloqueio server-side: link pending com expires_at no passado (NOW() do banco).
+      if (existingLink.status === "pending" && existingLink.expires_at) {
+        const expiredCheck = await client.query(
+          `SELECT expires_at IS NOT NULL AND expires_at < NOW() AS is_expired
+             FROM order_links WHERE id = $1`,
+          [existingLink.id]
+        )
+        if (expiredCheck.rows[0]?.is_expired) {
+          throw new Error("Este link expirou e não pode mais ser utilizado")
+        }
       }
       if (existingLink.customer_name.trim().toLowerCase() !== order.customer_name.trim().toLowerCase()) {
         throw new Error("Os dados do pedido não conferem com o link registrado")

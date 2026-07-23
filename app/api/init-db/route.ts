@@ -139,11 +139,22 @@ export async function POST() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         confirmed_at TIMESTAMP WITH TIME ZONE,
+        expires_at TIMESTAMP WITH TIME ZONE,
         order_id UUID REFERENCES orders(id) ON DELETE SET NULL
       );
     `)
     await client.query(`CREATE INDEX IF NOT EXISTS idx_order_links_status ON order_links(status);`)
     await client.query(`CREATE INDEX IF NOT EXISTS idx_order_links_customer ON order_links(customer_name);`)
+    // Migração: coluna expires_at (snapshot do prazo no momento do registro do link)
+    try {
+      await client.query(`
+        ALTER TABLE order_links
+        ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE;
+      `)
+      console.log("API: Migração de campo expires_at em order_links aplicada com sucesso")
+    } catch (error) {
+      console.log("API: Campo expires_at já existe ou erro na migração:", error)
+    }
     console.log("API: Tabela order_links criada/verificada")
 
     // Tabela app_settings: configurações simples chave/valor (ex.: template padrão da mensagem)

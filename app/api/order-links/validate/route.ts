@@ -4,6 +4,7 @@ import {
   checkOrderExists,
   getAppSettingBoolean,
 } from "@/lib/database"
+import { getLinkExpirationSettings } from "@/lib/link-expiration"
 
 /**
  * Endpoint público que valida o trio (nome, pedido, quantidade) recebido pela
@@ -11,9 +12,11 @@ import {
  *
  * Resultados possíveis:
  *  - 'allowed'   → link existe e está pendente, e os dados conferem.
+ *                  Inclui `expiresAt` (ISO ou null) para o cronômetro do cliente.
  *  - 'confirmed' → link já foi confirmado, OU não existe link mas o pedido já
  *                   foi criado anteriormente (legacy). Cliente deve ir para
  *                   /confirmed/{orderNumber}.
+ *  - 'expired'   → link pendente cujo expires_at já passou. Inclui `message`.
  *  - 'invalid'   → link inexistente OU dados não conferem.
  */
 export async function POST(request: Request) {
@@ -45,7 +48,26 @@ export async function POST(request: Request) {
       if (!matchesName || !matchesQty) {
         return NextResponse.json({ result: "invalid", reason: "mismatch" }, { status: 200 })
       }
-      return NextResponse.json({ result: "allowed" }, { status: 200 })
+
+      // Link pending: verifica expiração (snapshot em expires_at).
+      if (link.expires_at) {
+        const expiresMs = new Date(link.expires_at).getTime()
+        if (Number.isFinite(expiresMs) && expiresMs < Date.now()) {
+          const { message } = await getLinkExpirationSettings()
+          return NextResponse.json(
+            { result: "expired", message, reason: "expired" },
+            { status: 200 },
+          )
+        }
+      }
+
+      return NextResponse.json(
+        {
+          result: "allowed",
+          expiresAt: link.expires_at ? new Date(link.expires_at).toISOString() : null,
+        },
+        { status: 200 },
+      )
     }
 
     // Sem link cadastrado: trata pedidos legados (já confirmados antes do refactor).
@@ -59,7 +81,10 @@ export async function POST(request: Request) {
     // (se ativo) é feito apenas no momento da confirmação do pedido.
     const restricted = await getAppSettingBoolean("catalog_access_restricted", true)
     if (!restricted) {
-      return NextResponse.json({ result: "allowed", reason: "unrestricted" }, { status: 200 })
+      return NextResponse.json(
+        { result: "allowed", reason: "unrestricted", expiresAt: null },
+        { status: 200 },
+      )
     }
 
     return NextResponse.json({ result: "invalid", reason: "not_registered" }, { status: 200 })

@@ -39,8 +39,12 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { Copy, Link2, Search, CheckCircle2, Save, MessageSquare, Settings, Ban, AlertTriangle } from "lucide-react"
+import { Copy, Link2, Search, CheckCircle2, Save, MessageSquare, Settings, Ban, AlertTriangle, Clock } from "lucide-react"
 import { useToast } from "@/hooks/use-sonner-toast"
+import {
+  LINK_EXPIRATION_DEFAULT_MESSAGE,
+  LINK_EXPIRATION_DEFAULT_MINUTES,
+} from "@/lib/link-expiration-constants"
 
 type OrderLinkStatus = "pending" | "confirmed" | "cancelled"
 
@@ -56,7 +60,14 @@ type OrderLink = {
   created_at: string
   updated_at: string
   confirmed_at: string | null
+  expires_at: string | null
   order_id: string | null
+}
+
+type LinkExpirationSettings = {
+  enabled: boolean
+  minutes: number
+  message: string
 }
 
 const PAGE_SIZE = 20
@@ -126,6 +137,7 @@ export default function AdminLinksPage() {
   // Modais do topo
   const [messageModalOpen, setMessageModalOpen] = useState(false)
   const [settingsModalOpen, setSettingsModalOpen] = useState(false)
+  const [expirationModalOpen, setExpirationModalOpen] = useState(false)
 
   // Modal de confirmação para cancelar link
   const [cancelTarget, setCancelTarget] = useState<OrderLink | null>(null)
@@ -146,6 +158,26 @@ export default function AdminLinksPage() {
   })
   const [accessSettingsLoading, setAccessSettingsLoading] = useState(true)
   const [savingAccessSettings, setSavingAccessSettings] = useState(false)
+
+  // Configurações de expiração de links
+  const [expirationSettings, setExpirationSettings] = useState<LinkExpirationSettings>({
+    enabled: false,
+    minutes: LINK_EXPIRATION_DEFAULT_MINUTES,
+    message: LINK_EXPIRATION_DEFAULT_MESSAGE,
+  })
+  const [expirationDraft, setExpirationDraft] = useState<LinkExpirationSettings>({
+    enabled: false,
+    minutes: LINK_EXPIRATION_DEFAULT_MINUTES,
+    message: LINK_EXPIRATION_DEFAULT_MESSAGE,
+  })
+  const [expirationHoursDraft, setExpirationHoursDraft] = useState(
+    String(Math.floor(LINK_EXPIRATION_DEFAULT_MINUTES / 60)),
+  )
+  const [expirationMinutesDraft, setExpirationMinutesDraft] = useState(
+    String(LINK_EXPIRATION_DEFAULT_MINUTES % 60),
+  )
+  const [expirationSettingsLoading, setExpirationSettingsLoading] = useState(true)
+  const [savingExpirationSettings, setSavingExpirationSettings] = useState(false)
 
   // Filters / list
   const [statusFilters, setStatusFilters] = useState<Record<OrderLinkStatus, boolean>>({
@@ -215,12 +247,56 @@ export default function AdminLinksPage() {
     }
   }, [])
 
+  // Carregar configurações de expiração na entrada da página
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch("/api/settings/link-expiration", { credentials: "include" })
+        if (!res.ok) throw new Error("Falha ao carregar configurações de expiração")
+        const data = (await res.json()) as LinkExpirationSettings
+        if (cancelled) return
+        const normalized: LinkExpirationSettings = {
+          enabled: !!data.enabled,
+          minutes:
+            Number.isInteger(data.minutes) && data.minutes > 0
+              ? data.minutes
+              : LINK_EXPIRATION_DEFAULT_MINUTES,
+          message:
+            typeof data.message === "string" && data.message.trim()
+              ? data.message
+              : LINK_EXPIRATION_DEFAULT_MESSAGE,
+        }
+        setExpirationSettings(normalized)
+        setExpirationDraft(normalized)
+        setExpirationHoursDraft(String(Math.floor(normalized.minutes / 60)))
+        setExpirationMinutesDraft(String(normalized.minutes % 60))
+      } catch (err) {
+        console.error(err)
+      } finally {
+        if (!cancelled) setExpirationSettingsLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   // Sincroniza o draft com o estado salvo sempre que o modal de configurações abrir.
   useEffect(() => {
     if (settingsModalOpen) {
       setAccessSettingsDraft(accessSettings)
     }
   }, [settingsModalOpen, accessSettings])
+
+  // Sincroniza o draft do modal de expiração ao abrir.
+  useEffect(() => {
+    if (expirationModalOpen) {
+      setExpirationDraft(expirationSettings)
+      setExpirationHoursDraft(String(Math.floor(expirationSettings.minutes / 60)))
+      setExpirationMinutesDraft(String(expirationSettings.minutes % 60))
+    }
+  }, [expirationModalOpen, expirationSettings])
 
   const loadLinks = async (pageNum = page) => {
     try {
@@ -315,6 +391,69 @@ export default function AdminLinksPage() {
       })
     } finally {
       setSavingTemplate(false)
+    }
+  }
+
+  const handleSaveExpirationSettings = async () => {
+    try {
+      setSavingExpirationSettings(true)
+      const hours = Number.parseInt(expirationHoursDraft, 10) || 0
+      const mins = Number.parseInt(expirationMinutesDraft, 10) || 0
+      const totalMinutes = hours * 60 + mins
+
+      if (expirationDraft.enabled && (!Number.isInteger(totalMinutes) || totalMinutes < 1)) {
+        toast.warning({
+          title: "Tempo inválido",
+          description: "Informe um tempo de expiração de pelo menos 1 minuto.",
+        })
+        return
+      }
+
+      const payload: LinkExpirationSettings = {
+        enabled: expirationDraft.enabled,
+        minutes: expirationDraft.enabled
+          ? totalMinutes
+          : expirationDraft.minutes > 0
+            ? expirationDraft.minutes
+            : LINK_EXPIRATION_DEFAULT_MINUTES,
+        message: expirationDraft.message.trim() || LINK_EXPIRATION_DEFAULT_MESSAGE,
+      }
+
+      const res = await fetch("/api/settings/link-expiration", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.message || err.error || "Falha ao salvar configurações")
+      }
+      const saved = (await res.json()) as LinkExpirationSettings
+      const normalized: LinkExpirationSettings = {
+        enabled: !!saved.enabled,
+        minutes: Number.isInteger(saved.minutes) ? saved.minutes : LINK_EXPIRATION_DEFAULT_MINUTES,
+        message:
+          typeof saved.message === "string" && saved.message.trim()
+            ? saved.message
+            : LINK_EXPIRATION_DEFAULT_MESSAGE,
+      }
+      setExpirationSettings(normalized)
+      setExpirationDraft(normalized)
+      toast.success({
+        title: "Expiração salva",
+        description: normalized.enabled
+          ? "Novos links passarão a expirar no prazo configurado."
+          : "A expiração foi desativada para novos links.",
+      })
+      setExpirationModalOpen(false)
+    } catch (err) {
+      toast.error({
+        title: "Erro ao salvar expiração",
+        description: err instanceof Error ? err.message : "Erro desconhecido",
+      })
+    } finally {
+      setSavingExpirationSettings(false)
     }
   }
 
@@ -441,6 +580,14 @@ export default function AdminLinksPage() {
           <Button variant="outline" onClick={() => setMessageModalOpen(true)}>
             <MessageSquare className="w-4 h-4 mr-2" />
             Mensagem padrão
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setExpirationModalOpen(true)}
+            title="Expiração de links"
+          >
+            <Clock className="w-4 h-4 mr-2" />
+            Expiração
           </Button>
           <Button
             variant="outline"
@@ -748,17 +895,23 @@ export default function AdminLinksPage() {
                         <Badge variant="secondary">{link.quantity} {link.quantity === 1 ? "produto" : "produtos"}</Badge>
                       </TableCell>
                       <TableCell>
-                        {link.status === "confirmed" ? (
-                          <Badge className="bg-green-100 text-green-700 hover:bg-green-100">Confirmado</Badge>
-                        ) : link.status === "cancelled" ? (
-                          <Badge variant="secondary" className="bg-red-100 text-red-700 hover:bg-red-100">
-                            Cancelado
-                          </Badge>
-                        ) : (
-                          <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 hover:bg-yellow-100">
-                            Pendente
-                          </Badge>
-                        )}
+                        <div className="flex flex-col gap-1 items-start">
+                          {link.status === "confirmed" ? (
+                            <Badge className="bg-green-100 text-green-700 hover:bg-green-100">Confirmado</Badge>
+                          ) : link.status === "cancelled" ? (
+                            <Badge variant="secondary" className="bg-red-100 text-red-700 hover:bg-red-100">
+                              Cancelado
+                            </Badge>
+                          ) : link.expires_at && new Date(link.expires_at).getTime() < Date.now() ? (
+                            <Badge variant="secondary" className="bg-orange-100 text-orange-800 hover:bg-orange-100">
+                              Expirado
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 hover:bg-yellow-100">
+                              Pendente
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <p className="text-xs text-gray-700">
@@ -771,6 +924,21 @@ export default function AdminLinksPage() {
                             <span className="font-medium text-green-600">✅ Confirmado em:</span>
                             <br />
                             {formatDate(link.confirmed_at)}
+                          </p>
+                        )}
+                        {link.status === "pending" && link.expires_at && (
+                          <p className="text-xs text-gray-700 mt-2">
+                            <span
+                              className={`font-medium ${
+                                new Date(link.expires_at).getTime() < Date.now()
+                                  ? "text-orange-600"
+                                  : "text-indigo-600"
+                              }`}
+                            >
+                              ⏱ Expira em:
+                            </span>
+                            <br />
+                            {formatDate(link.expires_at)}
                           </p>
                         )}
                       </TableCell>
@@ -973,6 +1141,117 @@ export default function AdminLinksPage() {
             >
               <Ban className="w-4 h-4 mr-2" />
               {cancelling ? "Cancelando..." : "Cancelar link"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Expiração de links */}
+      <Dialog open={expirationModalOpen} onOpenChange={setExpirationModalOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Expiração de links</DialogTitle>
+            <DialogDescription>
+              Defina o prazo global para novos links. O tempo começa a contar no
+              momento do registro. Links já gerados mantêm o prazo (ou a ausência
+              dele) que tinham na criação.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-5 py-2">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <p className="text-sm font-medium text-gray-900">
+                  Ativar expiração de links
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Quando ativado, novos links pendentes expiram após o prazo
+                  configurado e o cliente não poderá mais escolher itens.
+                </p>
+              </div>
+              <Switch
+                checked={expirationDraft.enabled}
+                disabled={expirationSettingsLoading || savingExpirationSettings}
+                onCheckedChange={(checked) => {
+                  setExpirationDraft((prev) => ({ ...prev, enabled: checked }))
+                }}
+              />
+            </div>
+
+            {expirationDraft.enabled && (
+              <div className="space-y-3 border-t pt-4">
+                <p className="text-sm font-medium text-gray-900">Tempo de expiração</p>
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="expHours">Horas</Label>
+                    <Input
+                      id="expHours"
+                      type="number"
+                      min={0}
+                      max={720}
+                      value={expirationHoursDraft}
+                      disabled={savingExpirationSettings}
+                      onChange={(e) => {
+                        const onlyDigits = e.target.value.replace(/\D/g, "").slice(0, 3)
+                        setExpirationHoursDraft(onlyDigits)
+                      }}
+                      className="w-24"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="expMinutes">Minutos</Label>
+                    <Input
+                      id="expMinutes"
+                      type="number"
+                      min={0}
+                      max={59}
+                      value={expirationMinutesDraft}
+                      disabled={savingExpirationSettings}
+                      onChange={(e) => {
+                        const onlyDigits = e.target.value.replace(/\D/g, "").slice(0, 2)
+                        const n = Number.parseInt(onlyDigits || "0", 10)
+                        setExpirationMinutesDraft(String(Math.min(59, n)))
+                      }}
+                      className="w-24"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500">
+                  Contagem a partir do registro do link. Ex.: 24h = 1 dia.
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-2 border-t pt-4">
+              <Label htmlFor="expMessage">Mensagem de link expirado</Label>
+              <Textarea
+                id="expMessage"
+                value={expirationDraft.message}
+                disabled={expirationSettingsLoading || savingExpirationSettings}
+                onChange={(e) =>
+                  setExpirationDraft((prev) => ({ ...prev, message: e.target.value }))
+                }
+                rows={4}
+                placeholder={LINK_EXPIRATION_DEFAULT_MESSAGE}
+              />
+              <p className="text-xs text-gray-500">
+                Texto exibido ao cliente quando o link estiver expirado.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setExpirationModalOpen(false)}
+              disabled={savingExpirationSettings}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSaveExpirationSettings}
+              disabled={expirationSettingsLoading || savingExpirationSettings}
+            >
+              <Save className="w-4 h-4 mr-2" />
+              {savingExpirationSettings ? "Salvando..." : "Salvar"}
             </Button>
           </DialogFooter>
         </DialogContent>
