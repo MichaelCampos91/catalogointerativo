@@ -1203,6 +1203,74 @@ export async function getAppSettingBoolean(
   }
 }
 
+// --- Custos de produção (app_settings) ---
+
+export const COST_SETTING_KEYS = {
+  cutSewPerItem: "cost_cut_sew_per_item",
+  fabricPerMeter: "cost_fabric_per_meter",
+  packagingPerOrder: "cost_packaging_per_order",
+} as const
+
+export type ProductionCosts = {
+  cutSewPerItem: number
+  fabricPerMeter: number
+  packagingPerOrder: number
+}
+
+const DEFAULT_PRODUCTION_COSTS: ProductionCosts = {
+  cutSewPerItem: 0,
+  fabricPerMeter: 0,
+  packagingPerOrder: 0,
+}
+
+function parseMoneySetting(value: string | null): number {
+  if (value === null || value === undefined || value.trim() === "") return 0
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 0) return 0
+  return Math.round(n * 100) / 100
+}
+
+export async function getProductionCosts(): Promise<ProductionCosts> {
+  try {
+    const [cutSew, fabric, packaging] = await Promise.all([
+      getAppSetting(COST_SETTING_KEYS.cutSewPerItem),
+      getAppSetting(COST_SETTING_KEYS.fabricPerMeter),
+      getAppSetting(COST_SETTING_KEYS.packagingPerOrder),
+    ])
+    return {
+      cutSewPerItem: parseMoneySetting(cutSew),
+      fabricPerMeter: parseMoneySetting(fabric),
+      packagingPerOrder: parseMoneySetting(packaging),
+    }
+  } catch (error) {
+    console.error("Erro ao buscar custos de produção:", error)
+    throw error
+  }
+}
+
+export async function upsertProductionCosts(costs: ProductionCosts): Promise<ProductionCosts> {
+  const normalize = (n: number, label: string): number => {
+    if (typeof n !== "number" || !Number.isFinite(n) || n < 0) {
+      throw new Error(`${label} deve ser um número maior ou igual a zero`)
+    }
+    return Math.round(n * 100) / 100
+  }
+
+  const cutSewPerItem = normalize(costs.cutSewPerItem, "Corte e costura")
+  const fabricPerMeter = normalize(costs.fabricPerMeter, "Tecido sublimado")
+  const packagingPerOrder = normalize(costs.packagingPerOrder, "Embalagem")
+
+  await Promise.all([
+    upsertAppSetting(COST_SETTING_KEYS.cutSewPerItem, String(cutSewPerItem)),
+    upsertAppSetting(COST_SETTING_KEYS.fabricPerMeter, String(fabricPerMeter)),
+    upsertAppSetting(COST_SETTING_KEYS.packagingPerOrder, String(packagingPerOrder)),
+  ])
+
+  return { cutSewPerItem, fabricPerMeter, packagingPerOrder }
+}
+
+export { DEFAULT_PRODUCTION_COSTS }
+
 // --- Pedidos por nome de cliente (listagem pública) ---
 
 export type PublicOrderSummary = {
@@ -1717,6 +1785,393 @@ export async function incrementPromoModalClick(id: string): Promise<void> {
     )
   } catch (error) {
     console.error("Erro ao incrementar cliques do modal promocional:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+// --- Measurements (metragem por quantidade) ---
+
+export type Measurement = {
+  id: string
+  quantity: number
+  meters: number
+  observation: string
+  created_at: string
+  updated_at: string
+}
+
+export type CreateMeasurementInput = {
+  quantity: number
+  meters: number
+  observation?: string
+}
+
+export type UpdateMeasurementInput = {
+  quantity: number
+  meters: number
+  observation?: string
+}
+
+function mapMeasurementRow(row: Record<string, unknown>): Measurement {
+  return {
+    id: String(row.id),
+    quantity: Number(row.quantity),
+    meters: Number(row.meters),
+    observation: typeof row.observation === "string" ? row.observation : "",
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+  }
+}
+
+function validateMeasurementInput(input: {
+  quantity: number
+  meters: number
+  observation?: string
+}): { quantity: number; meters: number; observation: string } {
+  if (!Number.isInteger(input.quantity) || input.quantity <= 0) {
+    throw new Error("Quantidade deve ser um inteiro maior que zero")
+  }
+  if (typeof input.meters !== "number" || !Number.isFinite(input.meters) || input.meters < 0) {
+    throw new Error("Metros deve ser um número maior ou igual a zero")
+  }
+  const meters = Math.round(input.meters * 100) / 100
+  const observation = (input.observation ?? "").trim()
+  if (observation.length > 500) {
+    throw new Error("Observação muito longa (máx. 500 caracteres)")
+  }
+  return { quantity: input.quantity, meters, observation }
+}
+
+export async function getMeasurements(): Promise<Measurement[]> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `SELECT id, quantity, meters, observation, created_at, updated_at
+       FROM measurements
+       ORDER BY quantity ASC`
+    )
+    return result.rows.map(mapMeasurementRow)
+  } catch (error) {
+    console.error("Erro ao buscar medidas:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function createMeasurement(input: CreateMeasurementInput): Promise<Measurement> {
+  const validated = validateMeasurementInput(input)
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `INSERT INTO measurements (quantity, meters, observation)
+       VALUES ($1, $2, $3)
+       RETURNING id, quantity, meters, observation, created_at, updated_at`,
+      [validated.quantity, validated.meters, validated.observation]
+    )
+    return mapMeasurementRow(result.rows[0])
+  } catch (error: unknown) {
+    const code = error && typeof error === "object" && "code" in error ? (error as { code: string }).code : ""
+    if (code === "23505") {
+      throw new Error("Já existe uma medida para esta quantidade")
+    }
+    console.error("Erro ao criar medida:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function updateMeasurement(
+  id: string,
+  input: UpdateMeasurementInput
+): Promise<Measurement> {
+  const validated = validateMeasurementInput(input)
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(
+      `UPDATE measurements
+       SET quantity = $2, meters = $3, observation = $4, updated_at = NOW()
+       WHERE id = $1
+       RETURNING id, quantity, meters, observation, created_at, updated_at`,
+      [id, validated.quantity, validated.meters, validated.observation]
+    )
+    if (result.rows.length === 0) {
+      throw new Error("Medida não encontrada")
+    }
+    return mapMeasurementRow(result.rows[0])
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message === "Medida não encontrada") throw error
+    const code = error && typeof error === "object" && "code" in error ? (error as { code: string }).code : ""
+    if (code === "23505") {
+      throw new Error("Já existe uma medida para esta quantidade")
+    }
+    console.error("Erro ao atualizar medida:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function deleteMeasurement(id: string): Promise<void> {
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query(`DELETE FROM measurements WHERE id = $1 RETURNING id`, [id])
+    if (result.rows.length === 0) {
+      throw new Error("Medida não encontrada")
+    }
+  } catch (error) {
+    console.error("Erro ao excluir medida:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+// --- Dashboard analytics ---
+
+export type DashboardPreset = "this_month" | "last_month" | "last_3_months" | "custom"
+export type DashboardGranularity = "day" | "week" | "month" | "year"
+
+export type DashboardSummary = {
+  ordersCount: number
+  itemsSum: number
+  metersTotal: number
+  missingQuantities: number[]
+}
+
+export type DashboardSeriesPoint = {
+  bucket: string
+  orders: number
+  items: number
+}
+
+export type DashboardTopQuantity = {
+  quantity: number
+  orderCount: number
+}
+
+export type DashboardTopItem = {
+  code: string
+  count: number
+}
+
+export type DashboardTopCustomer = {
+  customer_name: string
+  itemsSum: number
+  ordersCount: number
+}
+
+export type DashboardData = {
+  from: string
+  to: string
+  summary: DashboardSummary
+  series: DashboardSeriesPoint[]
+  topQuantities: DashboardTopQuantity[]
+  topItems: DashboardTopItem[]
+  topCustomers: DashboardTopCustomer[]
+}
+
+function startOfUtcDay(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+}
+
+function addUtcDays(d: Date, days: number): Date {
+  const next = new Date(d)
+  next.setUTCDate(next.getUTCDate() + days)
+  return next
+}
+
+function addUtcMonths(d: Date, months: number): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + months, 1))
+}
+
+/** Resolve intervalo [from, toExclusive) em ISO UTC a partir do preset ou datas custom. */
+export function resolveDashboardPeriod(
+  preset: DashboardPreset,
+  fromStr?: string,
+  toStr?: string,
+  now: Date = new Date()
+): { from: Date; toExclusive: Date } {
+  const today = startOfUtcDay(now)
+
+  if (preset === "custom") {
+    if (!fromStr || !toStr) {
+      throw new Error("Período personalizado exige from e to")
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fromStr) || !/^\d{4}-\d{2}-\d{2}$/.test(toStr)) {
+      throw new Error("Datas devem estar no formato YYYY-MM-DD")
+    }
+    const from = new Date(`${fromStr}T00:00:00.000Z`)
+    const toDay = new Date(`${toStr}T00:00:00.000Z`)
+    if (Number.isNaN(from.getTime()) || Number.isNaN(toDay.getTime())) {
+      throw new Error("Datas inválidas")
+    }
+    if (from > toDay) {
+      throw new Error("Data início deve ser anterior ou igual à data fim")
+    }
+    return { from, toExclusive: addUtcDays(toDay, 1) }
+  }
+
+  if (preset === "this_month") {
+    const from = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1))
+    return { from, toExclusive: addUtcMonths(from, 1) }
+  }
+
+  if (preset === "last_month") {
+    const thisMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1))
+    const from = addUtcMonths(thisMonth, -1)
+    return { from, toExclusive: thisMonth }
+  }
+
+  // last_3_months: mês atual + 2 anteriores (início do mês há 2 meses até fim do mês atual)
+  const thisMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1))
+  const from = addUtcMonths(thisMonth, -2)
+  return { from, toExclusive: addUtcMonths(thisMonth, 1) }
+}
+
+const GRANULARITY_TRUNC: Record<DashboardGranularity, string> = {
+  day: "day",
+  week: "week",
+  month: "month",
+  year: "year",
+}
+
+export async function getDashboardData(
+  from: Date,
+  toExclusive: Date,
+  granularity: DashboardGranularity
+): Promise<DashboardData> {
+  const truncUnit = GRANULARITY_TRUNC[granularity] ?? "day"
+  let client
+  try {
+    client = await pool.connect()
+    const rangeParams = [from.toISOString(), toExclusive.toISOString()]
+
+    const summaryResult = await client.query(
+      `SELECT
+         COUNT(*)::int AS orders_count,
+         COALESCE(SUM(o.quantity_purchased), 0)::bigint AS items_sum,
+         COALESCE(SUM(m.meters), 0)::numeric AS meters_total
+       FROM orders o
+       LEFT JOIN measurements m ON m.quantity = o.quantity_purchased
+       WHERE o.finalized_at IS NOT NULL
+         AND o.canceled_at IS NULL
+         AND o.finalized_at >= $1
+         AND o.finalized_at < $2`,
+      rangeParams
+    )
+
+    const missingResult = await client.query(
+      `SELECT DISTINCT o.quantity_purchased AS quantity
+       FROM orders o
+       LEFT JOIN measurements m ON m.quantity = o.quantity_purchased
+       WHERE o.finalized_at IS NOT NULL
+         AND o.canceled_at IS NULL
+         AND o.finalized_at >= $1
+         AND o.finalized_at < $2
+         AND m.id IS NULL
+       ORDER BY quantity ASC`,
+      rangeParams
+    )
+
+    const seriesResult = await client.query(
+      `SELECT
+         date_trunc($3, o.finalized_at AT TIME ZONE 'UTC') AS bucket,
+         COUNT(*)::int AS orders,
+         COALESCE(SUM(o.quantity_purchased), 0)::bigint AS items
+       FROM orders o
+       WHERE o.finalized_at IS NOT NULL
+         AND o.canceled_at IS NULL
+         AND o.finalized_at >= $1
+         AND o.finalized_at < $2
+       GROUP BY 1
+       ORDER BY 1 ASC`,
+      [...rangeParams, truncUnit]
+    )
+
+    const topQtyResult = await client.query(
+      `SELECT o.quantity_purchased AS quantity, COUNT(*)::int AS order_count
+       FROM orders o
+       WHERE o.finalized_at IS NOT NULL
+         AND o.canceled_at IS NULL
+         AND o.finalized_at >= $1
+         AND o.finalized_at < $2
+       GROUP BY o.quantity_purchased
+       ORDER BY order_count DESC, quantity ASC
+       LIMIT 10`,
+      rangeParams
+    )
+
+    const topItemsResult = await client.query(
+      `SELECT elem AS code, COUNT(*)::int AS count
+       FROM orders o,
+            jsonb_array_elements_text(o.selected_images) AS elem
+       WHERE o.finalized_at IS NOT NULL
+         AND o.canceled_at IS NULL
+         AND o.finalized_at >= $1
+         AND o.finalized_at < $2
+       GROUP BY elem
+       ORDER BY count DESC, code ASC
+       LIMIT 50`,
+      rangeParams
+    )
+
+    const topCustomersResult = await client.query(
+      `SELECT
+         o.customer_name,
+         COALESCE(SUM(o.quantity_purchased), 0)::bigint AS items_sum,
+         COUNT(*)::int AS orders_count
+       FROM orders o
+       WHERE o.finalized_at IS NOT NULL
+         AND o.canceled_at IS NULL
+         AND o.finalized_at >= $1
+         AND o.finalized_at < $2
+       GROUP BY o.customer_name
+       ORDER BY items_sum DESC, orders_count DESC, customer_name ASC
+       LIMIT 10`,
+      rangeParams
+    )
+
+    const summaryRow = summaryResult.rows[0]
+    return {
+      from: from.toISOString(),
+      to: toExclusive.toISOString(),
+      summary: {
+        ordersCount: Number(summaryRow.orders_count) || 0,
+        itemsSum: Number(summaryRow.items_sum) || 0,
+        metersTotal: Number(summaryRow.meters_total) || 0,
+        missingQuantities: missingResult.rows.map((r: { quantity: number }) => Number(r.quantity)),
+      },
+      series: seriesResult.rows.map((r: { bucket: Date | string; orders: number; items: string | number }) => ({
+        bucket: r.bucket instanceof Date ? r.bucket.toISOString() : String(r.bucket),
+        orders: Number(r.orders) || 0,
+        items: Number(r.items) || 0,
+      })),
+      topQuantities: topQtyResult.rows.map((r: { quantity: number; order_count: number }) => ({
+        quantity: Number(r.quantity),
+        orderCount: Number(r.order_count),
+      })),
+      topItems: topItemsResult.rows.map((r: { code: string; count: number }) => ({
+        code: String(r.code),
+        count: Number(r.count),
+      })),
+      topCustomers: topCustomersResult.rows.map(
+        (r: { customer_name: string; items_sum: string | number; orders_count: number }) => ({
+          customer_name: String(r.customer_name),
+          itemsSum: Number(r.items_sum) || 0,
+          ordersCount: Number(r.orders_count) || 0,
+        })
+      ),
+    }
+  } catch (error) {
+    console.error("Erro ao buscar dados do dashboard:", error)
     throw error
   } finally {
     if (client) client.release()

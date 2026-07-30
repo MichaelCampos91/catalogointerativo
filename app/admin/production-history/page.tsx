@@ -23,7 +23,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination"
-import { getMeasureForQuantity } from "../measurements"
+import { buildMeasureMap, getMeasureLabel } from "../measurements"
 
 type Batch = {
   id: string
@@ -49,14 +49,14 @@ function formatDate(dateString: string) {
   return new Date(dateString).toLocaleString("pt-BR")
 }
 
-function generateOrderReference(order: Order): string {
+function generateOrderReference(order: Order, measureMap: Record<number, string>): string {
   const completionDate = order.is_pending ? null : new Date(order.updated_at)
   if (!completionDate) return "Pendente"
   const day = completionDate.getDate().toString().padStart(2, "0")
   const month = (completionDate.getMonth() + 1).toString().padStart(2, "0")
   const year = completionDate.getFullYear().toString()
   const dateString = `${day}${month}${year}`
-  const measure = getMeasureForQuantity(order.quantity_purchased)
+  const measure = getMeasureLabel(measureMap, order.quantity_purchased)
   return `${order.order}-${dateString}-${order.quantity_purchased}UN ${measure}`
 }
 
@@ -73,6 +73,21 @@ export default function ProductionHistoryPage() {
   const [listDialogOpen, setListDialogOpen] = useState(false)
   const [selectedBatchOrders, setSelectedBatchOrders] = useState<Order[]>([])
   const [loadingBatch, setLoadingBatch] = useState(false)
+  const [measureMap, setMeasureMap] = useState<Record<number, string>>({})
+
+  useEffect(() => {
+    const loadMeasures = async () => {
+      try {
+        const res = await fetch("/api/measurements", { credentials: "include" })
+        if (!res.ok) return
+        const data = await res.json()
+        setMeasureMap(buildMeasureMap(data.measurements || []))
+      } catch {
+        // Listas usam "N/A" se o mapa estiver vazio
+      }
+    }
+    loadMeasures()
+  }, [])
 
   useEffect(() => {
     loadBatches()
@@ -119,7 +134,7 @@ export default function ProductionHistoryPage() {
   }
 
   const copyReferences = () => {
-    const text = selectedBatchOrders.map((o) => generateOrderReference(o)).join("\n")
+    const text = selectedBatchOrders.map((o) => generateOrderReference(o, measureMap)).join("\n")
     navigator.clipboard.writeText(text).then(
       () => toast.success({ title: "Copiado", description: "Referências copiadas para a área de transferência." }),
       () => toast.error({ title: "Erro", description: "Não foi possível copiar." }),
@@ -208,7 +223,7 @@ export default function ProductionHistoryPage() {
                                 const res = await fetch(`/api/production-history/${batch.id}/orders`)
                                 if (!res.ok) return
                                 const orders: Order[] = await res.json()
-                                const text = orders.map((o) => generateOrderReference(o)).join("\n")
+                                const text = orders.map((o) => generateOrderReference(o, measureMap)).join("\n")
                                 await navigator.clipboard.writeText(text)
                                 toast.success({ title: "Copiado", description: "Referências copiadas." })
                               }}
@@ -267,7 +282,7 @@ export default function ProductionHistoryPage() {
               <div className="space-y-2">
                 {selectedBatchOrders.map((order) => (
                   <div key={order.id} className="text-sm py-1 border-b border-gray-100">
-                    <span className="font-medium">{order.order}</span> — {order.customer_name} — {generateOrderReference(order)}
+                    <span className="font-medium">{order.order}</span> — {order.customer_name} — {generateOrderReference(order, measureMap)}
                   </div>
                 ))}
               </div>

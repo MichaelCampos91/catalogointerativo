@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Download, User, Package, ArrowLeft, AlertCircle, Copy, Check, ChevronDown, Search } from "lucide-react"
+import { Download, User, Package, ArrowLeft, AlertCircle, Copy, Check, ChevronDown, Search, Ruler } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-sonner-toast"
 import {
@@ -45,7 +45,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { getMeasureForQuantity } from "./measurements"
+import { buildMeasureMap, getMeasureLabel } from "./measurements"
+import { MeasurementsModal } from "./components/MeasurementsModal"
 
 const PAGE_SIZE = 100
 const PERIOD_FIELD_OPTIONS: { value: OrderPeriodField; label: string }[] = [
@@ -126,8 +127,22 @@ export default function AdminPage() {
   const [selectedOrdersForList, setSelectedOrdersForList] = useState<string[]>([])
   const [listDialogOpen, setListDialogOpen] = useState(false)
   const [selectedOrdersDataForList, setSelectedOrdersDataForList] = useState<Order[]>([])
+  const [measureMap, setMeasureMap] = useState<Record<number, string>>({})
+  const [measuresModalOpen, setMeasuresModalOpen] = useState(false)
+
+  const loadMeasureMap = async () => {
+    try {
+      const res = await fetch("/api/measurements", { credentials: "include" })
+      if (!res.ok) return
+      const data = await res.json()
+      setMeasureMap(buildMeasureMap(data.measurements || []))
+    } catch {
+      // Listas usam "N/A" se o mapa estiver vazio
+    }
+  }
 
   useEffect(() => {
+    loadMeasureMap()
     loadFilteredOrders(1)
   }, [])
 
@@ -523,7 +538,7 @@ export default function AdminPage() {
       const refWithMeasure = generateOrderReference(order)
       const lastSpace = refWithMeasure.lastIndexOf(" ")
       const reference = lastSpace > -1 ? refWithMeasure.slice(0, lastSpace) : refWithMeasure
-      const measure = getMeasureForQuantity(order.quantity_purchased)
+      const measure = getMeasureLabel(measureMap, order.quantity_purchased)
       return `${reference}\t1\t${measure}`
     })
     copyToClipboard(lines.join("\n"))
@@ -553,7 +568,7 @@ export default function AdminPage() {
     const dateString = `${day}${month}${year}`
 
     const quantity = order.quantity_purchased
-    const measure = getMeasureForQuantity(quantity)
+    const measure = getMeasureLabel(measureMap, quantity)
 
     // Novo formato: [Número do pedido]-data-[quantidade]UN metragem
     return `${order.order}-${dateString}-${quantity}UN ${measure}`
@@ -599,9 +614,15 @@ export default function AdminPage() {
   return (
     <>
     <div className="max-w-6xl mx-auto w-full">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Painel Administrativo</h1>
-          <p className="text-gray-600">Gerencie os pedidos do catálogo</p>
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Pedidos</h1>
+            <p className="text-gray-600">Gerencie os pedidos do catálogo</p>
+          </div>
+          <Button variant="outline" onClick={() => setMeasuresModalOpen(true)}>
+            <Ruler className="w-4 h-4 mr-2" />
+            Medidas
+          </Button>
         </div>
 
         {/* Filtros: Status (checkboxes) */}
@@ -1289,6 +1310,12 @@ export default function AdminPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <MeasurementsModal
+        open={measuresModalOpen}
+        onOpenChange={setMeasuresModalOpen}
+        onChanged={loadMeasureMap}
+      />
     </>
   )
 }

@@ -1,32 +1,26 @@
-export const MEASURE_BY_QUANTITY: Record<number, string> = {
-  2: "1,58",
-  3: "0,56", // DINIZ
-  4: "1,58",
-  6: "1,13", // DINIZ
-  8: "1,67",
-  9: "1,69", // DINIZ
-  10: "2,22",
-  11: "2,26",
-  12: "2,26", // DINIZ
-  15: "2,82", // DINIZ
-  16: "3,33",
-  17: "3,37",
-  18: "3,39", // DINIZ
-  20: "3,89",
-  21: "3,95", // DINIZ
-  24: "4,52", // DINIZ
-  26: "4,79",
-  27: "5,09", // DINIZ
-  28: "5,55",
-  30: "5,65", // DINIZ
-  32: "6,10",
-  35: "6,71",
-  36: "6,87",
-  40: "7,76",
-  60: "11,32",
+/** Formata metros com 2 casas e vírgula (ex.: 1.58 → "1,58"). */
+export function formatMeters(meters: number): string {
+  return meters.toFixed(2).replace(".", ",")
 }
 
-export function getMeasureForQuantity(quantity: number): string {
-  return MEASURE_BY_QUANTITY[quantity] || "N/A"
+/**
+ * Retorna o rótulo de medida para uma quantidade a partir de um mapa
+ * quantidade → string já formatada. Fallback: "N/A".
+ */
+export function getMeasureLabel(
+  measureMap: Record<number, string>,
+  quantity: number
+): string {
+  return measureMap[quantity] ?? "N/A"
 }
 
+/** Monta mapa quantidade → metros formatados a partir da lista da API. */
+export function buildMeasureMap(
+  measurements: Array<{ quantity: number; meters: number }>
+): Record<number, string> {
+  const map: Record<number, string> = {}
+  for (const m of measurements) {
+    map[m.quantity] = formatMeters(Number(m.meters))
+  }
+  return map
+}
