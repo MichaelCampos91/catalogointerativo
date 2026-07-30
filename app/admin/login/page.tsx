@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -14,6 +14,12 @@ export default function AdminLoginPage() {
   const [submitting, setSubmitting] = useState(false)
   const { login, user } = useAuth()
   const router = useRouter()
+
+  useEffect(() => {
+    if (user) {
+      router.replace("/admin")
+    }
+  }, [user, router])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -30,7 +36,6 @@ export default function AdminLoginPage() {
   }
 
   if (user) {
-    router.replace("/admin")
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <p className="text-muted-foreground">Redirecionando...</p>

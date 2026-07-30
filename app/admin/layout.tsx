@@ -4,7 +4,7 @@ import { ProtectedRoute, useAuth } from "@/lib/auth-context"
 import { useRouter, usePathname } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { LogOut, BarChart3, History, FolderOpen, Link2, Megaphone } from "lucide-react"
+import { LogOut, BarChart3, History, FolderOpen, Link2, Megaphone, Package } from "lucide-react"
 
 export default function AdminLayout({
   children,
@@ -57,13 +57,22 @@ export default function AdminLayout({
         <nav className="fixed top-[65px] left-0 right-0 z-40 bg-white border-b">
           <div className="container mx-auto px-4 pt-3">
             <div className="flex gap-4">
+              <Link href="/admin/dashboard">
+                <Button
+                  variant="ghost"
+                  className={navLinkClass(isActive("/admin/dashboard"))}
+                >
+                  <BarChart3 className="h-4 w-4 mr-2" />
+                  Dashboard
+                </Button>
+              </Link>
               <Link href="/admin">
                 <Button
                   variant="ghost"
                   className={navLinkClass(isActive("/admin"))}
                 >
-                  <BarChart3 className="h-4 w-4 mr-2" />
-                  Dashboard
+                  <Package className="h-4 w-4 mr-2" />
+                  Pedidos
                 </Button>
               </Link>
               <Link href="/admin/links">
