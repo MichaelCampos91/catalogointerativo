@@ -23,6 +23,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { ArrowLeft, Folder, FileIcon, RefreshCw, Home, Plus, Upload, Trash2, ImagePlus, FolderPlus, Pencil } from "lucide-react"
+import { matchesSearch } from "@/lib/search"
 
 type Category = {
   id: string
@@ -412,11 +413,8 @@ export default function FilesPage() {
 
   const filteredCategories = useMemo(() => {
     if (!files?.categories) return []
-    
-    return files.categories.filter(cat => {
-      const searchLower = searchQuery.toLowerCase()
-      return cat.name.toLowerCase().includes(searchLower)
-    })
+
+    return files.categories.filter((cat) => matchesSearch(cat.name, searchQuery))
   }, [files?.categories, searchQuery])
 
   // Adicionar função para deletar imagem individual

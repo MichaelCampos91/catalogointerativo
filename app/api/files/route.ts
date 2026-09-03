@@ -5,6 +5,7 @@ import { S3Client, ListObjectsV2Command, ListObjectsV2CommandOutput, PutObjectCo
 import sharp from "sharp"
 import { getFromCache, setCache, generateCacheKey, invalidateCache, getSignedUrlForR2 } from "@/lib/r2-cache"
 import { requireAuth, authErrorResponse } from "@/lib/auth"
+import { matchesSearch } from "@/lib/search"
 
 // Função para inicializar o S3Client para Cloudflare R2
 function getS3Client() {
@@ -103,15 +104,6 @@ function sanitizeName(name: string): string {
     .trim()
 }
 
-// Função para normalizar strings (remover acentos, espaços extras e minúsculas)
-function normalize(str: string) {
-  return str
-    .normalize('NFD')
-    .replace(/[ -]/g, '') // remove acentos
-    .replace(/\s+/g, ' ')           // espaços múltiplos para um só
-    .trim()                          // remove espaços nas pontas
-    .toLowerCase()
-}
 
 // Função auxiliar para invalidar cache de múltiplos níveis
 // Invalida o cache do diretório atual, do diretório pai (se houver) e da raiz
@@ -423,8 +415,7 @@ export async function buildCatalogResponse(request: Request) {
 
     // Aplicar filtro de busca se especificado
     if (search) {
-      const normalizedSearch = normalize(search)
-      categories = categories.filter((cat) => normalize(cat.name).includes(normalizedSearch))
+      categories = categories.filter((cat) => matchesSearch(cat.name, search))
     }
 
     // Paginação de categorias

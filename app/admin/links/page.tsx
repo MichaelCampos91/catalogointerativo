@@ -631,11 +631,9 @@ export default function AdminLinksPage() {
               <Label htmlFor="quantity">Quantidade de itens</Label>
               <Input
                 id="quantity"
-                type="number"
+                type="text"
                 inputMode="numeric"
-                min={1}
-                max={999}
-                step={1}
+                pattern="[0-9]*"
                 maxLength={3}
                 value={quantity}
                 onChange={(e) => {
@@ -643,6 +641,7 @@ export default function AdminLinksPage() {
                   const onlyDigits = e.target.value.replace(/\D/g, "").slice(0, 3)
                   setQuantity(onlyDigits)
                 }}
+                onWheel={(e) => e.currentTarget.blur()}
                 placeholder="Ex.: 10"
               />
             </div>
