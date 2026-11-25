@@ -67,12 +67,34 @@ type CatalogViewProps = {
   mode?: CatalogViewMode
 }
 
+function CatalogResultsSkeleton() {
+  return (
+    <div className="space-y-8" role="status" aria-live="polite" aria-busy="true">
+      <span className="sr-only">Carregando resultados...</span>
+      {Array.from({ length: 3 }, (_, row) => (
+        <div key={row}>
+          <div className="mb-4 h-6 w-40 animate-pulse rounded bg-gray-200" />
+          <div className="flex gap-3 overflow-hidden pb-4">
+            {Array.from({ length: 4 }, (_, card) => (
+              <div key={card} className="w-[200px] flex-shrink-0">
+                <div className="aspect-square animate-pulse rounded-lg bg-gray-200" />
+                <div className="mx-auto mt-2 h-4 w-16 animate-pulse rounded bg-gray-200" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function CatalogView({ mode = "order" }: CatalogViewProps) {
   const [categories, setCategories] = useState<Category[]>([])
   const [images, setImages] = useState<CatalogImage[]>([])
   const [selectedImages, setSelectedImages] = useState<string[]>([])
   const [customerData, setCustomerData] = useState<CustomerData | null>(null)
   const [loading, setLoading] = useState(false)
+  const [resultsLoading, setResultsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
@@ -99,6 +121,9 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
   const router = useRouter()
   const pathname = usePathname()
   const expiredHandledRef = useRef(false)
+  const catalogShellReady = useRef(false)
+  const catalogRequestId = useRef(0)
+  const resultsRef = useRef<HTMLDivElement>(null)
   const selectedCounts = useMemo(
     () =>
       selectedImages.reduce<Record<string, number>>((acc, code) => {
@@ -516,6 +541,7 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
 
   // Função para carregar dados do catálogo
   const loadCatalogData = async (page = 1, search = "") => {
+    const requestId = ++catalogRequestId.current
     try {
       setError(null)
       
@@ -527,6 +553,8 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
           setCategories(cachedData.categories || [])
           setImages(cachedData.images || [])
           setPagination(cachedData.pagination || pagination)
+          catalogShellReady.current = true
+          resultsRef.current?.scrollTo({ top: 0 })
           
           // Atualizar cache de imagens
           if (customerData) {
@@ -549,7 +577,11 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
       }
       
       if (page === 1) {
-        setLoading(true)
+        if (catalogShellReady.current) {
+          setResultsLoading(true)
+        } else {
+          setLoading(true)
+        }
       } else {
         setLoadingMore(true)
       }
@@ -569,6 +601,7 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
         throw new Error(`Erro ao carregar catálogo: ${errorData.message || response.status}`)
       }
       const data = await response.json()
+      if (requestId !== catalogRequestId.current) return
 
       // DEBUG: Exibir o termo buscado e o resultado retornado
       // console.log('[CATALOG SEARCH] Termo buscado:', search)
@@ -593,6 +626,8 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
       if (page === 1) {
         setCategories(newCategories)
         setImages(newImages)
+        catalogShellReady.current = true
+        resultsRef.current?.scrollTo({ top: 0 })
       } else {
         setCategories((prev) => [...prev, ...newCategories])
         setImages((prev) => [...prev, ...newImages])
@@ -641,8 +676,11 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
       console.error("Erro ao carregar dados:", error)
       setError(error instanceof Error ? error.message : "Erro desconhecido ao carregar dados")
     } finally {
-      setLoading(false)
-      setLoadingMore(false)
+      if (requestId === catalogRequestId.current) {
+        setLoading(false)
+        setResultsLoading(false)
+        setLoadingMore(false)
+      }
     }
   }
 
@@ -679,6 +717,7 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
 
   // Função para detectar quando o usuário chegou ao final da página
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (resultsLoading) return
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget
     if (scrollHeight - scrollTop <= clientHeight * 1.5) {
       loadMore()
@@ -934,10 +973,15 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
       </div>
 
       <div 
+        ref={resultsRef}
         className="max-w-4xl mx-auto p-4 pb-20 overflow-y-auto"
         style={{ height: 'calc(100vh - 120px)' }}
         onScroll={handleScroll}
       >
+        {resultsLoading ? (
+          <CatalogResultsSkeleton />
+        ) : (
+        <>
         {/* Tendências: topo, mesmo layout das pastas; oculto durante busca */}
         {!searchQuery.trim() && trendingImages.length > 0 && (
           <div className="mb-8">
@@ -1105,6 +1149,9 @@ export default function CatalogView({ mode = "order" }: CatalogViewProps) {
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto"></div>
             <p className="text-sm text-gray-500 mt-2">Carregando mais imagens...</p>
           </div>
+        )}
+
+        </>
         )}
 
         {/* Modal de confirmação de aumento de quantidade */}
