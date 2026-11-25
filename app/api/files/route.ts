@@ -5,7 +5,8 @@ import { S3Client, ListObjectsV2Command, ListObjectsV2CommandOutput, PutObjectCo
 import sharp from "sharp"
 import { getFromCache, setCache, generateCacheKey, invalidateCache, getSignedUrlForR2 } from "@/lib/r2-cache"
 import { requireAuth, authErrorResponse } from "@/lib/auth"
-import { matchesSearch } from "@/lib/search"
+import { buildFolderPath, categoryMatchesQuery, tagsForPath } from "@/lib/folder-tags"
+import { deleteFolderSearchTags, listFolderSearchTags, renameFolderSearchTags } from "@/lib/database"
 
 // Função para inicializar o S3Client para Cloudflare R2
 function getS3Client() {
@@ -272,6 +273,7 @@ export async function buildCatalogResponse(request: Request) {
     const page = parseInt(searchParams.get("page") || "1", 10)
     const limit = parseInt(searchParams.get("limit") || "50", 10)
     const all = searchParams.get("all") === "true"
+    const includeTags = searchParams.get("includeTags") === "1"
     const forceReload = searchParams.has("_t") // Verificar se há parâmetro de cache-busting
 
     // Inicializar R2
@@ -282,7 +284,7 @@ export async function buildCatalogResponse(request: Request) {
     const searchPrefix = dir ? `${basePrefix}${dir}/` : basePrefix
 
     // Verificar cache antes de buscar do R2 (mas ignorar se forceReload for true)
-    const cacheKey = generateCacheKey(searchPrefix, dir, search, page, limit, all)
+    const cacheKey = generateCacheKey(searchPrefix, dir, search, page, limit, all, includeTags)
     const cachedData = !forceReload ? getFromCache(cacheKey) : null
 
     if (cachedData) {
@@ -413,9 +415,33 @@ export async function buildCatalogResponse(request: Request) {
       images: images,
     }))
 
-    // Aplicar filtro de busca se especificado
+    // Nome da pasta, tag (inclusive de subpasta) ou código/nome de arquivo.
+    // Se só o código casar, a pasta volta apenas com as imagens que casaram.
+    let tagMap = new Map<string, string[]>()
+    if (search || includeTags) {
+      try {
+        tagMap = await listFolderSearchTags()
+      } catch (error) {
+        console.error("Erro ao carregar tags de busca; a busca segue por nome e código:", error)
+      }
+    }
+
     if (search) {
-      categories = categories.filter((cat) => matchesSearch(cat.name, search))
+      categories = categories.flatMap((cat) => {
+        const folderPath = buildFolderPath(dir, cat.name)
+        const related = folderPath ? tagsForPath(tagMap, folderPath).related : []
+        const matched = categoryMatchesQuery(cat, search, related)
+        if (!matched.include) return []
+        return [{ ...cat, images: matched.images }]
+      })
+    }
+
+    if (includeTags) {
+      categories = categories.map((cat) => {
+        const folderPath = buildFolderPath(dir, cat.name)
+        const { own, related } = folderPath ? tagsForPath(tagMap, folderPath) : { own: [], related: [] }
+        return { ...cat, searchTags: own, searchMatchTags: related }
+      })
     }
 
     // Paginação de categorias
@@ -723,6 +749,28 @@ export async function POST(request: Request) {
               Key: oldKey,
             })
           )
+        }
+
+        const oldFolderPath = buildFolderPath(dir, sanitizedOld)
+        const newFolderPath = buildFolderPath(dir, sanitizedNew)
+        if (oldFolderPath && newFolderPath) {
+          try {
+            await renameFolderSearchTags(oldFolderPath, newFolderPath)
+          } catch (tagError) {
+            console.error("Pasta renomeada no armazenamento, mas as tags não foram atualizadas", {
+              oldFolderPath,
+              newFolderPath,
+              tagError,
+            })
+            invalidateCacheForDir(dir)
+            return NextResponse.json(
+              {
+                error:
+                  "Pasta renomeada, mas as tags de busca não foram atualizadas. Abra a pasta nova e salve as tags de novo.",
+              },
+              { status: 500 }
+            )
+          }
         }
 
         invalidateCacheForDir(dir)
@@ -1058,8 +1106,26 @@ export async function DELETE(request: Request) {
       )
       // console.log("API: Pasta excluída com sucesso", { count: folderFiles.length })
       
+      const deletedFolderPath = buildFolderPath(dir, sanitizedItemPath)
+      if (deletedFolderPath) {
+        try {
+          await deleteFolderSearchTags(deletedFolderPath)
+        } catch (tagError) {
+          console.error("Pasta excluída no armazenamento, mas as tags não foram removidas", {
+            deletedFolderPath,
+            tagError,
+          })
+          invalidateCacheForDir(dir)
+          return NextResponse.json(
+            {
+              error: "Pasta excluída, mas as tags de busca não foram removidas.",
+            },
+            { status: 500 }
+          )
+        }
+      }
+
       // Invalidar cache relacionado ao diretório (atual, pai e raiz)
-      // console.log('🗑️ [Backend] Invalidando cache após exclusão de pasta')
       invalidateCacheForDir(dir)
       
       return NextResponse.json({ message: "Pasta excluída com sucesso" })

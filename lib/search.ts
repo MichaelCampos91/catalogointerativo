@@ -14,3 +14,11 @@ export function matchesSearch(haystack: string, query: string): boolean {
   const normalizedHaystack = normalizeForSearch(haystack)
   return normalizedQuery.split(" ").every((token) => normalizedHaystack.includes(token))
 }
+
+/** Termo normalizado de uma busca concluída. Null se tiver menos de 3 letras ou números. */
+export function completedSearchTerm(raw: string): string | null {
+  const normalized = normalizeForSearch(raw)
+  const alphanumeric = normalized.replace(/[^\p{L}\p{N}]/gu, "")
+  if (alphanumeric.length < 3) return null
+  return normalized
+}

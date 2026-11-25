@@ -1,4 +1,5 @@
 import { Pool } from "pg"
+import { folderPathLikePrefix } from "./folder-tags"
 
 // Configuração do pool usando variáveis de ambiente
 const pool = new Pool({
@@ -2172,6 +2173,210 @@ export async function getDashboardData(
     }
   } catch (error) {
     console.error("Erro ao buscar dados do dashboard:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export type SearchStatsSort = "count_desc" | "count_asc" | "alpha_asc" | "alpha_desc"
+
+export type SearchStatRow = {
+  rank: number
+  term: string
+  count: number
+}
+
+const SEARCH_SCHEMA_SQL = [
+  `CREATE TABLE IF NOT EXISTS folder_search_tags (
+    folder_path TEXT PRIMARY KEY,
+    tags TEXT[] NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT folder_search_tags_nonempty CHECK (cardinality(tags) > 0)
+  )`,
+  `CREATE TABLE IF NOT EXISTS catalog_search_events (
+    id BIGSERIAL PRIMARY KEY,
+    term_normalized TEXT NOT NULL,
+    searched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_catalog_search_events_searched_at
+    ON catalog_search_events (searched_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_catalog_search_events_term_time
+    ON catalog_search_events (term_normalized, searched_at)`,
+]
+
+function isUndefinedTable(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "42P01"
+}
+
+export async function ensureSearchSchema(): Promise<void> {
+  let client
+  try {
+    client = await pool.connect()
+    for (const statement of SEARCH_SCHEMA_SQL) {
+      await client.query(statement)
+    }
+  } catch (error) {
+    console.error("Erro ao garantir tabelas de busca:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function listFolderSearchTags(): Promise<Map<string, string[]>> {
+  const tagsByPath = new Map<string, string[]>()
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query<{ folder_path: string; tags: string[] | null }>(
+      `SELECT folder_path, tags FROM folder_search_tags`
+    )
+    for (const row of result.rows) {
+      tagsByPath.set(row.folder_path, row.tags ?? [])
+    }
+    return tagsByPath
+  } catch (error) {
+    if (isUndefinedTable(error)) return tagsByPath
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function replaceFolderSearchTags(folderPath: string, tags: string[]): Promise<void> {
+  let client
+  try {
+    client = await pool.connect()
+    if (tags.length === 0) {
+      await client.query(`DELETE FROM folder_search_tags WHERE folder_path = $1`, [folderPath])
+      return
+    }
+    await client.query(
+      `INSERT INTO folder_search_tags (folder_path, tags, updated_at)
+       VALUES ($1, $2::text[], NOW())
+       ON CONFLICT (folder_path)
+       DO UPDATE SET tags = EXCLUDED.tags, updated_at = NOW()`,
+      [folderPath, tags]
+    )
+  } catch (error) {
+    console.error("Erro ao salvar tags da pasta:", error)
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function renameFolderSearchTags(oldPath: string, newPath: string): Promise<void> {
+  if (!oldPath || !newPath || oldPath === newPath) return
+  let client
+  try {
+    client = await pool.connect()
+    await client.query(
+      `UPDATE folder_search_tags
+       SET folder_path = $2 || substring(folder_path FROM char_length($1) + 1),
+           updated_at = NOW()
+       WHERE folder_path = $1
+          OR folder_path LIKE $3 ESCAPE '#'`,
+      [oldPath, newPath, folderPathLikePrefix(oldPath)]
+    )
+  } catch (error) {
+    if (isUndefinedTable(error)) return
+    console.error("Erro ao renomear tags da pasta:", { oldPath, newPath, error })
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function deleteFolderSearchTags(folderPath: string): Promise<void> {
+  if (!folderPath) return
+  let client
+  try {
+    client = await pool.connect()
+    await client.query(
+      `DELETE FROM folder_search_tags
+       WHERE folder_path = $1
+          OR folder_path LIKE $2 ESCAPE '#'`,
+      [folderPath, folderPathLikePrefix(folderPath)]
+    )
+  } catch (error) {
+    if (isUndefinedTable(error)) return
+    console.error("Erro ao excluir tags da pasta:", { folderPath, error })
+    throw error
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function recordCatalogSearch(term: string): Promise<void> {
+  let client
+  try {
+    client = await pool.connect()
+    await client.query(`INSERT INTO catalog_search_events (term_normalized) VALUES ($1)`, [term])
+  } catch (error) {
+    if (isUndefinedTable(error)) {
+      console.error("Tabela catalog_search_events ainda não existe; busca não registrada")
+      return
+    }
+    console.error("Erro ao registrar busca do catálogo:", error)
+  } finally {
+    if (client) client.release()
+  }
+}
+
+export async function getCatalogSearchStats(params: {
+  from: Date | null
+  toExclusive: Date | null
+  sort: SearchStatsSort
+  page: number
+  limit: number
+}): Promise<{ total: number; rows: SearchStatRow[] }> {
+  const offset = (params.page - 1) * params.limit
+  let client
+  try {
+    client = await pool.connect()
+    const result = await client.query<{
+      term_normalized: string | null
+      search_count: number | null
+      rank: number | null
+      total_terms: number
+    }>(
+      `WITH grouped AS (
+         SELECT term_normalized,
+                COUNT(*)::int AS search_count,
+                RANK() OVER (ORDER BY COUNT(*) DESC, term_normalized ASC)::int AS rank
+         FROM catalog_search_events
+         WHERE ($1::timestamptz IS NULL OR searched_at >= $1)
+           AND ($2::timestamptz IS NULL OR searched_at < $2)
+         GROUP BY term_normalized
+       ),
+       paged AS (
+         SELECT *
+         FROM grouped
+         ORDER BY
+           CASE WHEN $3 = 'count_asc' THEN search_count END ASC,
+           CASE WHEN $3 = 'count_desc' THEN search_count END DESC,
+           CASE WHEN $3 = 'alpha_desc' THEN term_normalized END DESC,
+           term_normalized ASC
+         LIMIT $4 OFFSET $5
+       )
+       SELECT p.term_normalized, p.search_count, p.rank, t.total_terms
+       FROM (SELECT COUNT(*)::int AS total_terms FROM grouped) t
+       LEFT JOIN paged p ON TRUE`,
+      [params.from, params.toExclusive, params.sort, params.limit, offset]
+    )
+    const total = Number(result.rows[0]?.total_terms) || 0
+    const rows = result.rows
+      .filter((row) => row.term_normalized)
+      .map((row) => ({
+        rank: Number(row.rank) || 0,
+        term: String(row.term_normalized),
+        count: Number(row.search_count) || 0,
+      }))
+    return { total, rows }
+  } catch (error) {
+    console.error("Erro ao consultar termos pesquisados:", error)
     throw error
   } finally {
     if (client) client.release()

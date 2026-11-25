@@ -284,6 +284,31 @@ export async function POST() {
     )
     console.log("API: Tabela promo_modals criada/verificada")
 
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS folder_search_tags (
+        folder_path TEXT PRIMARY KEY,
+        tags TEXT[] NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT folder_search_tags_nonempty CHECK (cardinality(tags) > 0)
+      );
+    `)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS catalog_search_events (
+        id BIGSERIAL PRIMARY KEY,
+        term_normalized TEXT NOT NULL,
+        searched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `)
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_catalog_search_events_searched_at
+        ON catalog_search_events (searched_at);
+    `)
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_catalog_search_events_term_time
+        ON catalog_search_events (term_normalized, searched_at);
+    `)
+    console.log("API: Tabelas de busca criadas/verificadas")
+
     // Inserir dados de exemplo apenas se não existirem
     const categoriesCount = await client.query("SELECT COUNT(*) FROM categories")
     if (Number.parseInt(categoriesCount.rows[0].count) === 0) {

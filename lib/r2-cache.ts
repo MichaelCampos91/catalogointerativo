@@ -70,8 +70,16 @@ export function setCache(key: string, data: any): void {
 /**
  * Gera uma chave de cache baseada nos parâmetros da requisição
  */
-export function generateCacheKey(prefix: string, dir: string, search: string, page: number, limit: number, all: boolean): string {
-  return `${prefix}:${dir}:${search}:${page}:${limit}:${all}`
+export function generateCacheKey(
+  prefix: string,
+  dir: string,
+  search: string,
+  page: number,
+  limit: number,
+  all: boolean,
+  includeTags = false
+): string {
+  return `${prefix}:${dir}:${search}:${page}:${limit}:${all}:${includeTags ? "tags" : "notags"}`
 }
 
 /**

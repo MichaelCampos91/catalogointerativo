@@ -23,7 +23,8 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { ArrowLeft, Folder, FileIcon, RefreshCw, Home, Plus, Upload, Trash2, ImagePlus, FolderPlus, Pencil } from "lucide-react"
-import { matchesSearch } from "@/lib/search"
+import { categoryMatchesQuery, replaceOwnSearchTags } from "@/lib/folder-tags"
+import { FolderTagsPopover } from "@/components/admin/FolderTagsPopover"
 
 type Category = {
   id: string
@@ -35,6 +36,8 @@ type Category = {
     url: string
     category: string
   }[]
+  searchTags?: string[]
+  searchMatchTags?: string[]
 }
 
 type FilesResponse = {
@@ -89,7 +92,7 @@ export default function FilesPage() {
 
       // Remover "files" do início do caminho se existir
       const cleanDir = currentDir.startsWith("files/") ? currentDir.slice(6) : currentDir
-      let url = `/api/files?dir=${encodeURIComponent(cleanDir)}&all=true`
+      let url = `/api/files?dir=${encodeURIComponent(cleanDir)}&all=true&includeTags=1`
       
       // Adicionar timestamp para cache-busting se forceReload for true
       if (forceReload) {
@@ -414,7 +417,9 @@ export default function FilesPage() {
   const filteredCategories = useMemo(() => {
     if (!files?.categories) return []
 
-    return files.categories.filter((cat) => matchesSearch(cat.name, searchQuery))
+    return files.categories.filter((cat) =>
+      categoryMatchesQuery(cat, searchQuery, cat.searchMatchTags ?? cat.searchTags ?? []).include
+    )
   }, [files?.categories, searchQuery])
 
   // Adicionar função para deletar imagem individual
@@ -514,7 +519,7 @@ export default function FilesPage() {
         <div className="relative mb-6 w-full">
           <input
             type="text"
-            placeholder="Buscar pasta..."
+            placeholder="Buscar pasta, código ou tag..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -574,7 +579,9 @@ export default function FilesPage() {
           <Card>
             <CardHeader>
               <CardTitle>{currentDir ? `Conteúdo de: ${currentDir}` : "Conteúdo da Pasta Raiz"}</CardTitle>
-              <CardDescription>{files.categories.length} pasta(s) encontrada(s)</CardDescription>
+              <CardDescription>
+                {searchQuery.trim() ? filteredCategories.length : files.categories.length} pasta(s) encontrada(s)
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {/* Parent directory button */}
@@ -609,6 +616,8 @@ export default function FilesPage() {
                 </div>
               ) : files.categories.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">Pasta vazia</div>
+              ) : filteredCategories.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">Nenhuma pasta encontrada</div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                   {filteredCategories.map((cat) => (
@@ -625,6 +634,29 @@ export default function FilesPage() {
                           <p className="text-sm font-medium truncate">{cat.name}</p>
                         </div>
                         <div className="mt-2 flex items-center justify-center gap-1">
+                          <FolderTagsPopover
+                            dir={currentDir.startsWith("files/") ? currentDir.slice(6) : currentDir}
+                            folderName={cat.name}
+                            tags={cat.searchTags ?? []}
+                            onSaved={(nextTags) => {
+                              setFiles((prev) => {
+                                if (!prev) return prev
+                                return {
+                                  ...prev,
+                                  categories: prev.categories.map((item) => {
+                                    if (item.id !== cat.id) return item
+                                    const own = item.searchTags ?? []
+                                    const match = item.searchMatchTags ?? own
+                                    return {
+                                      ...item,
+                                      searchTags: nextTags,
+                                      searchMatchTags: replaceOwnSearchTags(own, match, nextTags),
+                                    }
+                                  }),
+                                }
+                              })
+                            }}
+                          />
                           <Button
                             variant="ghost"
                             size="sm"
